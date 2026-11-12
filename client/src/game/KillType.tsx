@@ -1,19 +1,29 @@
-import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import '@fontsource/chakra-petch/500.css';
 import '@fontsource/chakra-petch/600.css';
 import '@fontsource/chakra-petch/700.css';
 import '@fontsource/jetbrains-mono/700.css';
 import './game.css';
 import { audio } from './audio';
-import { DIFFICULTIES, DIFFICULTY_CONFIG, type Difficulty } from './config';
-import { Game, type RunStats } from './engine';
+import { DIFFICULTIES, DIFFICULTY_CONFIG, WEAPONS, type Difficulty } from './config';
+import { Game, type LevelSummary, type RunStats } from './engine';
+import { spriteThumb } from './sprites';
+import { ENEMIES, WORLD_ORDER, WORLDS, type EnemyKind, type LevelInfo, type SpriteKey, type WorldId } from './worlds';
 import { Renderer } from './render';
 import {
   emptyBoards, fetchBoards, qualify, startRun, submit,
   type Boards, type LeaderboardEntry, type Qualification,
 } from './leaderboard';
 
-type Screen = 'home' | 'leaderboard' | 'playing' | 'over';
+type Screen = 'home' | 'world' | 'leaderboard' | 'faq' | 'playing' | 'over';
+
+const thumbCache = new Map<string, string>();
+function thumb(key: SpriteKey, px = 4) {
+  const k = `${key}@${px}`;
+  let v = thumbCache.get(k);
+  if (!v) { v = spriteThumb(key, px); thumbCache.set(k, v); }
+  return v;
+}
 
 const isTouchDevice = () =>
   typeof window !== 'undefined' &&
@@ -38,6 +48,9 @@ export function KillType() {
   const [needsTap, setNeedsTap] = useState(false);
   const [touch, setTouch] = useState(isTouchDevice);
   const [difficulty, setDifficulty] = useState<Difficulty>('hard');
+  const [world, setWorld] = useState<WorldId>(() => { try { return (localStorage.getItem('killtype.world') as WorldId) || 'mall'; } catch { return 'mall'; } });
+  const [intro, setIntro] = useState<{ info: LevelInfo; summary: LevelSummary | null } | null>(null);
+  const [scoreTip, setScoreTip] = useState(false);
   const [stats, setStats] = useState<RunStats | null>(null);
   const [boards, setBoards] = useState<Boards>(emptyBoards);
   const [boardTab, setBoardTab] = useState<Difficulty>('hard');
@@ -52,6 +65,10 @@ export function KillType() {
 
   const screenRef = useRef(screen);
   screenRef.current = screen;
+  const introRef = useRef(intro);
+  introRef.current = intro;
+  const difficultyRef = useRef(difficulty);
+  difficultyRef.current = difficulty;
   const touchRef = useRef(touch);
   touchRef.current = touch;
 
@@ -123,12 +140,18 @@ export function KillType() {
     const game = gameRef.current;
     game.onEvent = (e) => {
       if (e.type === 'pause') setPaused(e.paused);
+      if (e.type === 'intro') {
+        setIntro({ info: e.info, summary: e.summary });
+        setNeedsTap(false);
+        if (e.summary) audio.setIntensity(0, false);
+      }
       if (e.type === 'gameover') {
         setStats(e.stats);
         audio.setIntensity(0, false);
         setScreen('over');
         setPaused(false);
         setNeedsTap(false);
+        setIntro(null);
         inputRef.current?.blur();
       }
     };
@@ -164,17 +187,38 @@ export function KillType() {
     el.focus({ preventScroll: true });
   }, []);
 
-  const begin = useCallback((d: Difficulty) => {
+  /** Difficulty picked: next, choose where to start. */
+  const chooseDifficulty = useCallback((d: Difficulty) => {
     audio.unlock();
     audio.uiClick();
     audio.startMusic();
     setDifficulty(d);
+    setScreen('world');
+  }, []);
+
+  const begin = useCallback((d: Difficulty, w: WorldId) => {
+    audio.unlock();
+    audio.uiClick();
+    audio.startMusic();
+    setDifficulty(d);
+    setWorld(w);
+    try { localStorage.setItem('killtype.world', w); } catch { /* ignore */ }
     setStats(null);
     setPaused(false);
     setNeedsTap(false);
     setScreen('playing');
-    gameRef.current.start(d);
+    gameRef.current.start(d, w);
     runTokenRef.current = startRun(d);
+    inputRef.current?.blur();
+  }, []);
+
+  /** Dismiss the story card and drop into the level (focus must happen inside the gesture for iOS). */
+  const enterLevel = useCallback(() => {
+    if (!introRef.current) return;
+    audio.unlock();
+    audio.uiClick();
+    setIntro(null);
+    gameRef.current.beginLevel();
     focusTyping();
   }, [focusTyping]);
 
@@ -209,7 +253,13 @@ export function KillType() {
       const inField = !fromHidden && e.target instanceof HTMLInputElement;
       if (scr !== 'playing') {
         if (inField) return;
-        if (scr === 'home' && /^[1-4]$/.test(e.key)) begin(DIFFICULTIES[Number(e.key) - 1]);
+        if (scr === 'home' && /^[1-4]$/.test(e.key)) chooseDifficulty(DIFFICULTIES[Number(e.key) - 1]);
+        else if (scr === 'world' && /^[1-3]$/.test(e.key)) begin(difficultyRef.current, WORLD_ORDER[Number(e.key) - 1]);
+        else if ((scr === 'world' || scr === 'faq' || scr === 'leaderboard') && e.key === 'Escape') setScreen('home');
+        return;
+      }
+      if (introRef.current) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); enterLevel(); }
         return;
       }
       if (e.key === 'Escape') {
@@ -220,7 +270,7 @@ export function KillType() {
       if (game.paused) {
         const k = e.key.toLowerCase();
         if (k === 'c' || k === 'enter') { e.preventDefault(); resume(); }
-        else if (k === 'r') { e.preventDefault(); begin(game.difficulty); }
+        else if (k === 'r') { e.preventDefault(); begin(game.difficulty, game.world); }
         else if (k === 'm') { e.preventDefault(); quit(); }
         return;
       }
@@ -235,7 +285,7 @@ export function KillType() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [begin, pause, quit, resume]);
+  }, [begin, chooseDifficulty, enterLevel, pause, quit, resume]);
 
   // auto-pause when the tab is hidden or the window loses focus
   useEffect(() => {
@@ -274,7 +324,7 @@ export function KillType() {
     // On touch devices a closed keyboard means the player can't type: pause and ask for a tap.
     if (!touchRef.current) return;
     setTimeout(() => {
-      if (screenRef.current === 'playing' && document.activeElement !== inputRef.current && !gameRef.current.over) {
+      if (screenRef.current === 'playing' && !introRef.current && document.activeElement !== inputRef.current && !gameRef.current.over) {
         gameRef.current.setPaused(true);
         setNeedsTap(true);
       }
@@ -283,7 +333,7 @@ export function KillType() {
 
   const onStagePointer = () => {
     audio.unlock();
-    if (screenRef.current === 'playing' && !gameRef.current.paused) focusTyping();
+    if (screenRef.current === 'playing' && !gameRef.current.paused && !introRef.current) focusTyping();
   };
 
   const submitScore = async () => {
@@ -405,13 +455,13 @@ export function KillType() {
               <h2 className="kt-h2">STAND BY</h2>
               <div className="kt-stats">
                 <Stat label="SCORE" value={game.score.toLocaleString()} />
-                <Stat label="CHAPTER" value={String(game.level)} />
+                <Stat label="LEVEL" value={`${game.info.levelInWorld}/10`} />
                 <Stat label="WPM" value={String(game.wpm)} />
                 <Stat label="ACC" value={`${game.accuracyPct}%`} />
               </div>
               <div className="kt-menu">
                 <MenuBtn primary label="Resume" hint={touch ? '' : 'C'} onClick={resume} />
-                <MenuBtn label="Restart" hint={touch ? '' : 'R'} onClick={() => begin(game.difficulty)} />
+                <MenuBtn label="Restart" hint={touch ? '' : 'R'} onClick={() => begin(game.difficulty, game.world)} />
                 <MenuBtn label="Main menu" hint={touch ? '' : 'M'} onClick={quit} />
               </div>
               <div className="kt-pause-foot">
@@ -422,7 +472,13 @@ export function KillType() {
           </div>
         )}
 
-        {(screen === 'home' || screen === 'leaderboard') && (
+        {screen === 'playing' && intro && (
+          <div className="kt-overlay kt-intro" onPointerDown={(e) => e.stopPropagation()}>
+            <IntroCard intro={intro} touch={touch} onGo={enterLevel} />
+          </div>
+        )}
+
+        {(screen === 'home' || screen === 'leaderboard' || screen === 'world' || screen === 'faq') && (
           <div className="kt-overlay kt-menu-screen" onPointerDown={(e) => { e.stopPropagation(); audio.unlock(); audio.startMusic(); }}>
             <div className="kt-top-right"><MuteButton /></div>
             <div className="kt-home">
@@ -432,35 +488,82 @@ export function KillType() {
                 <p className="kt-tagline">Every word is a bullet. Type fast or get eaten.</p>
               </header>
 
-              {screen === 'home' ? (
+              {screen === 'home' && (
                 <>
+                  <div className="kt-step"><span>1</span> CHOOSE DIFFICULTY</div>
                   <div className="kt-diffs">
                     {DIFFICULTIES.map((d, i) => {
                       const cfg = DIFFICULTY_CONFIG[d];
                       return (
                         <button key={d} className={`kt-diff ${difficulty === d ? 'is-last' : ''}`} style={{ ['--accent' as any]: cfg.color, animationDelay: `${i * 60}ms` }}
-                          onClick={() => begin(d)} onMouseEnter={hover}>
+                          onClick={() => chooseDifficulty(d)} onMouseEnter={hover}>
                           <span className="kt-diff-top">
                             <span className="kt-diff-name">{d.toUpperCase()}</span>
                             {!touch && <span className="kt-key">{i + 1}</span>}
                           </span>
                           <span className="kt-pips">{[0, 1, 2, 3].map(p => <i key={p} className={p < cfg.threat ? 'on' : ''} />)}</span>
                           <span className="kt-diff-desc">{cfg.description}</span>
-                          <span className="kt-diff-cta">{touch ? 'TAP TO DEPLOY' : 'DEPLOY'} →</span>
+                          <span className="kt-diff-cta">×{cfg.scoreMultiplier} SCORE →</span>
                         </button>
                       );
                     })}
                   </div>
                   <div className="kt-home-actions">
                     <button className="kt-ghost" onClick={ui(() => { setBoardTab(difficulty); setScreen('leaderboard'); refreshBoards(); })} onMouseEnter={hover}>Leaderboard</button>
+                    <span className="kt-tip-wrap" onMouseEnter={() => setScoreTip(true)} onMouseLeave={() => setScoreTip(false)}>
+                      <button className="kt-ghost" aria-describedby="kt-score-tip" onClick={ui(() => setScoreTip(v => !v))} onFocus={() => setScoreTip(true)} onBlur={() => setScoreTip(false)}>
+                        <span className="kt-info">i</span> How scoring works
+                      </button>
+                      {scoreTip && (
+                        <span id="kt-score-tip" role="tooltip" className="kt-tooltip">
+                          <b>Each kill</b> = (100 + 10 per letter) × enemy value × combo × difficulty × weapon bonus.
+                          <br />Keep your combo alive: one typo resets it to zero. Bosses, break-frees and level clears add big bonuses.
+                          <button className="kt-tip-link" onClick={ui(() => { setScoreTip(false); setScreen('faq'); })}>Full scoring FAQ →</button>
+                        </span>
+                      )}
+                    </span>
+                    <button className="kt-ghost" onClick={ui(() => setScreen('faq'))} onMouseEnter={hover}>FAQ</button>
                   </div>
                   <ul className="kt-howto">
-                    <li><b>Type a word's first letter</b> to lock on.</li>
-                    <li><b>Finish the word</b> to fire. Mistakes break your combo.</li>
-                    <li><b>Glowing zombies</b> carry weapons. Kill them to take it.</li>
+                    <li><b>Type a word's first letter</b> to lock on, then finish it to fire.</li>
+                    <li><b>Grabbed?</b> Type the break-free word before the timer runs out.</li>
+                    <li><b>Kill the boss</b> to clear the level and refill your health.</li>
                   </ul>
                 </>
-              ) : (
+              )}
+
+              {screen === 'world' && (
+                <div className="kt-worlds-wrap">
+                  <div className="kt-step"><span>2</span> CHOOSE WHERE TO START
+                    <em style={{ color: DIFFICULTY_CONFIG[difficulty].color }}>{difficulty.toUpperCase()}</em>
+                  </div>
+                  <div className="kt-worlds">
+                    {WORLD_ORDER.map((wid, i) => {
+                      const W = WORLDS[wid];
+                      const cast = Array.from(new Set(W.levels.flatMap(l => Object.keys(l.roster) as EnemyKind[]))).slice(0, 7);
+                      return (
+                        <button key={wid} className={`kt-world ${world === wid ? 'is-last' : ''}`} style={{ ['--accent' as any]: W.color, animationDelay: `${i * 70}ms` }}
+                          onClick={() => begin(difficulty, wid)} onMouseEnter={hover}>
+                          <span className="kt-diff-top">
+                            <span className="kt-world-name">{W.name}</span>
+                            {!touch && <span className="kt-key">{i + 1}</span>}
+                          </span>
+                          <span className="kt-world-tag">{W.tagline}</span>
+                          <span className="kt-cast">{cast.map(k => <img key={k} src={thumb(W.skins[k].sprite, 3)} alt={W.skins[k].name} title={W.skins[k].name} />)}</span>
+                          <span className="kt-world-levels">{W.levels.slice(0, 4).map(l => l.name).join(' · ')} · …</span>
+                          <span className="kt-diff-cta">10 LEVELS · START HERE →</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="kt-world-note">Clear all 10 levels and you roll straight into the next world. Your score never resets until you die.</p>
+                  <div className="kt-home-actions"><button className="kt-ghost" onClick={ui(() => setScreen('home'))} onMouseEnter={hover}>← Back</button></div>
+                </div>
+              )}
+
+              {screen === 'faq' && <Faq onBack={ui(() => setScreen('home'))} />}
+
+              {screen === 'leaderboard' && (
                 <div className="kt-panel kt-lb">
                   <div className="kt-lb-head">
                     <div>
@@ -481,14 +584,14 @@ export function KillType() {
         {screen === 'over' && stats && (
           <div className="kt-overlay kt-over" onPointerDown={(e) => e.stopPropagation()}>
             <div className="kt-panel kt-over-panel">
-              <div className="kt-kicker" style={{ color: '#ff5a6e' }}>SIGNAL LOST</div>
+              <div className="kt-kicker" style={{ color: '#ff5a6e' }}>SIGNAL LOST · {stats.worldName} · {stats.levelName.toUpperCase()}</div>
               <h2 className="kt-h2 kt-dead">GAME OVER</h2>
               <div className="kt-final">
                 <span>FINAL SCORE</span>
                 <strong>{stats.score.toLocaleString()}</strong>
               </div>
               <div className="kt-stats six">
-                <Stat label="CHAPTER" value={String(stats.level)} />
+                <Stat label="LEVELS" value={String(stats.level - 1)} />
                 <Stat label="KILLS" value={String(stats.kills)} />
                 <Stat label="MAX COMBO" value={`×${stats.maxCombo}`} />
                 <Stat label="WPM" value={String(stats.wpm)} />
@@ -522,8 +625,8 @@ export function KillType() {
               <Board d={boardTab} limit={5} />
 
               <div className="kt-menu">
-                <MenuBtn primary label={`Play again · ${stats.difficulty.toUpperCase()}`} onClick={() => begin(stats.difficulty)} />
-                <MenuBtn label="Change difficulty" onClick={quit} />
+                <MenuBtn primary label={`Play again · ${WORLDS[stats.world].name}`} onClick={() => begin(stats.difficulty, stats.world)} />
+                <MenuBtn label="Change difficulty or world" onClick={quit} />
               </div>
             </div>
           </div>
@@ -549,5 +652,113 @@ function MenuBtn({ label, hint, onClick, primary }: { label: string; hint?: stri
       <span>{label}</span>
       {hint ? <kbd>{hint}</kbd> : null}
     </button>
+  );
+}
+
+function IntroCard({ intro, touch, onGo }: { intro: { info: LevelInfo; summary: LevelSummary | null }; touch: boolean; onGo: () => void }) {
+  const { info, summary } = intro;
+  const W = info.world;
+  const fresh = info.newKinds.slice(0, 4);
+  const firstOfWorld = info.levelInWorld === 1;
+  return (
+    <div className="kt-panel kt-intro-card" style={{ ['--accent' as any]: W.color }}>
+      {summary && (
+        <div className="kt-clear">
+          <div className="kt-kicker" style={{ color: '#3df6ff' }}>LEVEL CLEAR · {summary.name.toUpperCase()}</div>
+          <div className="kt-clear-row">
+            <span><b>{summary.score.toLocaleString()}</b> points</span>
+            <span><b>{summary.kills}</b> kills</span>
+            <span><b>{summary.accuracyPct}%</b> accuracy</span>
+            {summary.escapes > 0 && <span><b>{summary.escapes}</b> break-free{summary.escapes > 1 ? 's' : ''}</span>}
+            <span>bonus <b>+{summary.bonus.toLocaleString()}</b></span>
+          </div>
+        </div>
+      )}
+      <div className="kt-kicker">{firstOfWorld && summary ? `NEW WORLD · ${W.name}` : W.name}{info.loop ? ` · LOOP ${info.loop + 1}` : ''}</div>
+      <div className="kt-intro-level">LEVEL {info.levelInWorld}<span>/10</span></div>
+      <h2 className="kt-h2 kt-intro-name">{info.def.name.toUpperCase()}</h2>
+      <div className="kt-progress">{Array.from({ length: 10 }, (_, i) => <i key={i} className={i < info.levelInWorld - 1 ? 'done' : i === info.levelInWorld - 1 ? 'now' : ''} />)}</div>
+      <p className="kt-story">{info.def.story}</p>
+      {fresh.length > 0 && (
+        <div className="kt-threats">
+          <div className="kt-threats-h">{info.levelInWorld === 1 ? 'YOU WILL MEET' : 'NEW THREATS'}</div>
+          {fresh.map(k => (
+            <div key={k} className="kt-threat">
+              <img src={thumb(W.skins[k].sprite, 3)} alt="" />
+              <div><b>{W.skins[k].name}</b><span>{ENEMIES[k].blurb}</span></div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="kt-boss-line">BOSS · <b>{info.def.boss}</b></div>
+      <button className="kt-btn is-primary kt-go" autoFocus onClick={(e) => { e.stopPropagation(); onGo(); }}>
+        <span>{touch ? 'Tap to fight' : 'Fight'}</span>{!touch && <kbd>ENTER</kbd>}
+      </button>
+    </div>
+  );
+}
+
+function Faq({ onBack }: { onBack: () => void }) {
+  const worth = useMemo(() => (Object.keys(ENEMIES) as EnemyKind[]).sort((a, b) => ENEMIES[b].value - ENEMIES[a].value), []);
+  return (
+    <div className="kt-panel kt-faq">
+      <div className="kt-lb-head">
+        <div>
+          <div className="kt-kicker">FIELD MANUAL</div>
+          <h2 className="kt-h2">FAQ</h2>
+        </div>
+        <button className="kt-ghost" onClick={onBack}>← Back</button>
+      </div>
+      <details open>
+        <summary>How is my score calculated?</summary>
+        <p>Every kill is worth <code>(100 + 10 × letters) × enemy value × combo × difficulty × weapon</code>.</p>
+        <ul>
+          <li><b>Letters:</b> longer words are worth more. A 6-letter word starts at 160.</li>
+          <li><b>Combo:</b> every correct key adds 1. One typo, a bite or a hit sends it back to 0. This is the biggest lever on your score.</li>
+          <li><b>Difficulty:</b> Easy ×1, Normal ×1.2, Hard ×1.5, Extreme ×2.</li>
+          <li><b>Weapon:</b> any power-up weapon multiplies kills by ×1.5, and splash kills add every victim's value to the same shot.</li>
+        </ul>
+      </details>
+      <details>
+        <summary>What is each enemy worth?</summary>
+        <div className="kt-faq-grid">
+          {worth.map(k => (
+            <div key={k} className="kt-faq-enemy">
+              <img src={thumb(WORLDS.mall.skins[k].sprite, 3)} alt="" />
+              <div><b>{k === 'karen' ? 'Karen + dog' : k[0].toUpperCase() + k.slice(1)} <em>×{ENEMIES[k].value}</em></b><span>{ENEMIES[k].blurb}</span></div>
+            </div>
+          ))}
+        </div>
+        <p className="kt-faq-note">Each world re-skins these: in the Mall the dog is a poodle and the brute is Mall Santa, in the Airport the robot is a security drone, in the Theme Park the horse comes off the carousel.</p>
+      </details>
+      <details>
+        <summary>Power-ups</summary>
+        <p>Enemies that glow carry a weapon. Kill them to pick it up.</p>
+        <ul>
+          {(['grenade', 'rocket', 'machinegun', 'bazooka', 'nuke'] as const).map(id => {
+            const w = WEAPONS[id];
+            return <li key={id}><b style={{ color: w.color }}>{w.name}</b>: {w.ammo ? `${w.ammo} shot${w.ammo > 1 ? 's' : ''}` : `${w.duration / 1000}s`}, {w.wipeField ? 'kills everything on screen and clears projectiles' : w.explosive ? `explodes and takes up to ${w.maxCollateral >= 99 ? 'every' : w.maxCollateral} nearby enem${w.maxCollateral === 1 ? 'y' : 'ies'} with it, and blasts straight through armour` : `chains into ${w.maxCollateral} nearby enemy`}.</li>;
+          })}
+        </ul>
+      </details>
+      <details>
+        <summary>Getting grabbed</summary>
+        <p>If something reaches you it grabs on and starts biting. The camera pushes in and a <b>break-free word</b> appears with a countdown. Type it in time and you shove the attacker away, score <b>250 × words × difficulty</b> (more with a high combo), and stay locked on so you can finish the kill. Miss the timer and you lose a heart (two for brutes).</p>
+        <p>Carts, cars and horses don't grab. They ram you for instant damage, so kill them before they arrive.</p>
+      </details>
+      <details>
+        <summary>Bosses</summary>
+        <p>Every level ends with a boss. Shoot off its head, hands and feet in order, then type the execution sentence. It fires eye lasers and missiles, swipes at you and, from level 3, grabs you. A grab needs <b>three</b> fast words to escape. Destroying any limb staggers it and cancels whatever attack it was winding up.</p>
+        <p>Boss limbs are worth <code>(100 + 10 × letters) × combo × difficulty</code> each, and the kill adds <code>1,000 × level × difficulty</code> plus a sentence bonus. Killing the boss refills all five hearts.</p>
+      </details>
+      <details>
+        <summary>Levels and worlds</summary>
+        <p>Pick a world to start in: the Mall, the Airport or the Theme Park. Each has 10 levels with their own floor, enemies and boss, and each level is longer and faster than the last. Clearing a level pays <code>500 × level × difficulty</code>, or ×1.5 more if your accuracy for that level was 95% or better. After level 10 you move on to the next world, and after all three the loop starts again, faster.</p>
+      </details>
+      <details>
+        <summary>Does the leaderboard check scores?</summary>
+        <p>Yes. Each run gets a signed token when it starts, and the server rejects scores that are impossible for the time played. Leaderboards are split by difficulty.</p>
+      </details>
+    </div>
   );
 }

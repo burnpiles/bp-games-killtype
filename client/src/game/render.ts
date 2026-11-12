@@ -1,8 +1,9 @@
 // Canvas renderer. DPR-correct, no per-frame shadowBlur (glow comes from cached
 // radial textures drawn additively), persistent decal layer for blood and scorch.
 
-import { BOSS_THRESHOLD, COMBO_TIERS, DIFFICULTY_CONFIG, MAX_LIVES, WEAPONS } from './config';
+import { COMBO_TIERS, DIFFICULTY_CONFIG, MAX_LIVES, WEAPONS } from './config';
 import type { Boss, BossPart, Game, Zombie } from './engine';
+import { paintGround } from './ground';
 import { buildAtlas, rgba, type Atlas } from './sprites';
 
 const DISPLAY = '"Chakra Petch", "Rajdhani", system-ui, sans-serif';
@@ -28,6 +29,7 @@ export class Renderer {
   private decalEpoch = -1;
   private charW = new Map<string, number>();
   private t = 0;
+  private groundKey = '';
 
   constructor(private canvas: HTMLCanvasElement, private game: Game) {
     this.ctx = canvas.getContext('2d', { alpha: false })!;
@@ -67,85 +69,10 @@ export class Renderer {
 
   // ---------------- static layers ----------------
   private buildGround() {
-    const { w, h } = this;
-    const c = document.createElement('canvas');
-    const s = Math.min(this.dpr, 2);
-    c.width = Math.round(w * s); c.height = Math.round(h * s);
-    const g = c.getContext('2d')!;
-    g.scale(s, s);
-    const base = g.createLinearGradient(0, 0, 0, h);
-    base.addColorStop(0, '#0c1018');
-    base.addColorStop(1, '#10131c');
-    g.fillStyle = base;
-    g.fillRect(0, 0, w, h);
-    // concrete blotches
-    for (let i = 0; i < (w * h) / 9000; i++) {
-      const x = Math.random() * w, y = Math.random() * h, r = 30 + Math.random() * 120;
-      const gr = g.createRadialGradient(x, y, 0, x, y, r);
-      const light = Math.random() < 0.5;
-      gr.addColorStop(0, light ? 'rgba(60,70,90,0.07)' : 'rgba(0,0,0,0.25)');
-      gr.addColorStop(1, 'rgba(0,0,0,0)');
-      g.fillStyle = gr;
-      g.fillRect(x - r, y - r, r * 2, r * 2);
-    }
-    // grit
-    for (let i = 0; i < (w * h) / 60; i++) {
-      const v = Math.random();
-      g.fillStyle = v < 0.5 ? `rgba(255,255,255,${0.012 + Math.random() * 0.03})` : `rgba(0,0,0,${0.15 + Math.random() * 0.2})`;
-      const sz = Math.random() < 0.9 ? 1 : 2;
-      g.fillRect(Math.random() * w, Math.random() * h, sz, sz);
-    }
-    // slab seams
-    const tile = this.game.layout.compact ? 56 : 72;
-    g.strokeStyle = 'rgba(0,0,0,0.55)';
-    g.lineWidth = 1.5;
-    for (let x = (w / 2) % tile; x < w; x += tile) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke(); }
-    for (let y = (h / 2) % tile; y < h; y += tile) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); }
-    g.strokeStyle = 'rgba(90,200,255,0.035)';
-    g.lineWidth = 1;
-    for (let x = (w / 2) % tile + 1.5; x < w; x += tile) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke(); }
-    for (let y = (h / 2) % tile + 1.5; y < h; y += tile) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); }
-    // cracks
-    g.strokeStyle = 'rgba(0,0,0,0.6)';
-    for (let i = 0; i < (w * h) / 60000 + 4; i++) {
-      let x = Math.random() * w, y = Math.random() * h;
-      g.lineWidth = 1 + Math.random();
-      g.beginPath(); g.moveTo(x, y);
-      const a0 = Math.random() * Math.PI * 2;
-      for (let k = 0; k < 6 + Math.random() * 8; k++) {
-        const a = a0 + (Math.random() - 0.5) * 1.4;
-        x += Math.cos(a) * (6 + Math.random() * 14); y += Math.sin(a) * (6 + Math.random() * 14);
-        g.lineTo(x, y);
-      }
-      g.stroke();
-    }
-    // distant neon spill (street signs, burning cars) for colour depth
-    const spills = ['rgba(255,60,200,0.07)', 'rgba(61,246,255,0.06)', 'rgba(255,150,40,0.06)', 'rgba(120,90,255,0.06)'];
-    for (let i = 0; i < 5; i++) {
-      const edge = Math.random() < 0.5;
-      const x = edge ? (Math.random() < 0.5 ? 0 : w) : Math.random() * w;
-      const y = edge ? Math.random() * h : (Math.random() < 0.5 ? 0 : h);
-      const r = Math.max(w, h) * (0.18 + Math.random() * 0.2);
-      const gr = g.createRadialGradient(x, y, 0, x, y, r);
-      gr.addColorStop(0, spills[i % spills.length]);
-      gr.addColorStop(1, 'rgba(0,0,0,0)');
-      g.fillStyle = gr;
-      g.fillRect(x - r, y - r, r * 2, r * 2);
-    }
-    // painted defense perimeter around the player
-    const P = this.game.player;
-    const R = this.game.layout.compact ? 64 : 110;
-    g.save();
-    g.strokeStyle = 'rgba(61,246,255,0.10)';
-    g.lineWidth = 2;
-    g.setLineDash([10, 8]);
-    g.beginPath(); g.arc(P.x, P.y, R, 0, Math.PI * 2); g.stroke();
-    g.setLineDash([]);
-    g.strokeStyle = 'rgba(255,190,60,0.07)';
-    g.lineWidth = 6;
-    g.beginPath(); g.arc(P.x, P.y, R + 10, 0, Math.PI * 2); g.stroke();
-    g.restore();
-    this.ground = c;
+    const G = this.game;
+    this.groundKey = `${G.groundKey}|${this.w}x${this.h}`;
+    const P = { x: G.layout.w / 2, y: G.layout.mode === 'lane' ? G.layout.h - G.layout.bottomPad - (G.layout.compact ? 6 : 20) : G.layout.h / 2 + 30 };
+    this.ground = paintGround(G.groundKey ? G.info.def.ground : 'concrete', this.w, this.h, this.dpr, G.layout.compact, P, G.groundKey || 'menu');
   }
 
   private buildFog() {
@@ -302,27 +229,34 @@ export class Renderer {
     const c = this.ctx;
     const { w, h } = this;
     const L = G.layout;
+    if (`${G.groundKey}|${w}x${h}` !== this.groundKey) this.buildGround();
     this.flushDecals();
 
     c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     c.globalAlpha = 1;
     c.globalCompositeOperation = 'source-over';
 
-    // camera
+    // camera: normally anchored on the player; during a grab it pushes in on the struggle
     const tr = G.shake * G.shake;
     const maxOff = L.compact ? 10 : 18;
     const sx = (Math.sin(this.t * 61.3) + Math.sin(this.t * 37.1) * 0.6) * maxOff * tr + G.kick.x;
     const sy = (Math.cos(this.t * 53.7) + Math.sin(this.t * 41.9) * 0.6) * maxOff * tr + G.kick.y;
-    const zoom = 1 + G.zoom;
+    const k = G.cine * G.cine * (3 - 2 * G.cine);
+    const P = G.player;
+    const F = G.grab ? G.grabFocus() : (this.lastFocus ?? P);
+    if (G.grab) this.lastFocus = F; else if (G.cine <= 0) this.lastFocus = null;
+    const fx = P.x + (F.x - P.x) * k, fy = P.y + (F.y - P.y) * k;
+    const scx = P.x + (w / 2 - P.x) * k, scy = P.y + (h * (L.compact ? 0.4 : 0.46) - P.y) * k;
+    const zoom = 1 + G.zoom + k * (L.compact ? 0.75 : 0.95);
     c.save();
-    c.translate(G.player.x, G.player.y);
+    c.translate(scx, scy);
     c.scale(zoom, zoom);
-    c.rotate(Math.sin(this.t * 47) * 0.012 * tr);
-    c.translate(-G.player.x + sx, -G.player.y + sy);
+    c.rotate(Math.sin(this.t * 47) * 0.012 * tr + k * 0.02 * Math.sin(this.t * 1.3));
+    c.translate(-fx + sx, -fy + sy);
 
     // pad bleed so shake never shows an edge
     c.fillStyle = '#05060a';
-    c.fillRect(-40, -40, w + 80, h + 80);
+    c.fillRect(-60, -60, w + 120, h + 120);
     c.drawImage(this.ground, 0, 0, w, h);
     c.drawImage(this.decal, 0, 0, w, h);
     const sat = Math.min(G.kills * 0.003, 0.09);
@@ -330,7 +264,6 @@ export class Renderer {
 
     // light pool
     c.globalCompositeOperation = 'lighter';
-    const P = G.player;
     const flick = 0.85 + Math.sin(this.t * 13) * 0.03 + Math.sin(this.t * 31) * 0.02;
     this.glow(this.atlas.glow.cyan, P.x, P.y, (L.compact ? 170 : 320), 0.14 * flick);
     this.glow(this.atlas.glow.white, P.x, P.y, (L.compact ? 110 : 200), 0.05 * flick);
@@ -338,14 +271,19 @@ export class Renderer {
     c.globalCompositeOperation = 'source-over';
     c.globalAlpha = 1;
 
+    if (G.wreck) this.drawWreck();
     this.drawCorpses();
     this.drawParticles(false);
+    this.drawLeashes();
 
-    // characters, sorted by y for depth
-    const zs = [...G.zombies].sort((a, b) => a.y - b.y);
-    for (const z of zs) this.drawZombie(z);
+    // characters, sorted by y for depth (fliers on top)
+    const zs = [...G.zombies].sort((a, b) => Number(a.flying) - Number(b.flying) || a.y - b.y);
+    const ground = zs.filter(z => !z.flying), air = zs.filter(z => z.flying);
+    for (const z of ground) if (z.y <= P.y) this.drawZombie(z);
     if (G.boss.active) this.drawBoss(G.boss);
-    this.drawPlayer();
+    if (G.phase !== 'exit' || P.y > -40) this.drawPlayer();
+    for (const z of ground) if (z.y > P.y) this.drawZombie(z);
+    for (const z of air) this.drawZombie(z);
 
     c.globalCompositeOperation = 'lighter';
     this.drawTracers();
@@ -356,93 +294,173 @@ export class Renderer {
     c.globalAlpha = 1;
 
     // drifting fog
-    c.globalAlpha = 1;
-    const fs = 512, fx = (this.t * 8) % fs, fy = (this.t * 3) % fs;
-    for (let x = -fs + fx; x < w; x += fs) for (let y = -fs + fy; y < h; y += fs) c.drawImage(this.fog, x, y);
+    const fs = 512, fogx = (this.t * 8) % fs, fogy = (this.t * 3) % fs;
+    for (let x = -fs + fogx; x < w; x += fs) for (let y = -fs + fogy; y < h; y += fs) c.drawImage(this.fog, x, y);
 
     const live = G.running || G.over;
-    // word tags and markers (inside camera so they track their owners)
     // HUD blocks are pre-reserved so tags never slide underneath them
     const placed: Rect[] = L.compact ? [
       { x: 0, y: 0, w, h: L.topPad + 2 },
       { x: 0, y: h - 48, w: 136, h: 48 },
     ] : [
-      { x: 0, y: 0, w: 230, h: 116 },
+      { x: 0, y: 0, w: 260, h: 116 },
       { x: w / 2 - 200, y: 0, w: 400, h: 104 },
       { x: w - 330, y: 0, w: 330, h: 70 },
       { x: 0, y: h - 70, w: 240, h: 70 },
     ];
-    if (!live) { c.restore(); c.globalAlpha = 1; c.drawImage(this.vignette, 0, 0, w, h); this.drawPost(); return; }
-    if (G.boss.active) this.drawBossTags(G.boss, placed);
-    const lock = G.zombies.find(z => z.id === G.lockId && !z.doomed);
-    const closest = lock ? null : G.closest();
-    const ordered = [...G.zombies].sort((a, b) => Number(b.id === G.lockId) - Number(a.id === G.lockId) || Math.hypot(a.x - P.x, a.y - P.y) - Math.hypot(b.x - P.x, b.y - P.y));
-    for (const z of ordered) this.drawTag(z, z === lock, z === closest, !!lock, placed);
-    if (lock) this.drawLockBrackets(lock);
+    if (!live || G.phase === 'intro') { c.restore(); c.globalAlpha = 1; c.drawImage(this.vignette, 0, 0, w, h); this.drawPost(); return; }
+    const showTags = G.cine < 0.2 && G.phase === 'play';
+    if (showTags) {
+      if (G.boss.active) this.drawBossTags(G.boss, placed);
+      const lock = G.zombies.find(z => z.id === G.lockId && !z.doomed);
+      const closest = lock ? null : G.closest();
+      const ordered = [...G.zombies].sort((a, b) => Number(b.id === G.lockId) - Number(a.id === G.lockId) || Math.hypot(a.x - P.x, a.y - P.y) - Math.hypot(b.x - P.x, b.y - P.y));
+      for (const z of ordered) this.drawTag(z, z === lock, z === closest, !!lock, placed);
+      if (lock) this.drawLockBrackets(lock);
+    }
     this.drawPopups();
     c.restore();
 
     c.globalAlpha = 1;
     c.drawImage(this.vignette, 0, 0, w, h);
 
-    this.drawHud();
+    if (k > 0.01) this.drawCinema(k);
+    if (G.cine < 0.5) this.drawHud();
+    if (G.grab) this.drawGrab();
     this.drawBanner();
     this.drawPost();
   }
+  private lastFocus: { x: number; y: number } | null = null;
 
   // ---------------- world objects ----------------
   private drawCorpses() {
     const c = this.ctx;
     for (const k of this.game.corpses) {
-      const set = this.atlas.zombies[k.variant];
+      const set = this.atlas.sprites[k.sprite];
       const decay = k.age / k.max;
       c.save();
       c.translate(k.x, k.y);
       c.rotate(k.rot);
       if (k.flip) c.scale(-1, 1);
-      c.globalAlpha = 0.8 * (1 - decay) * (1 - decay);
+      c.globalAlpha = (k.flat ? 0.7 : 0.8) * (1 - decay) * (1 - decay);
+      if (k.flat) c.filter = 'brightness(0.35) saturate(0.4)';
       c.drawImage(set.frames[0], -set.w / 2, -set.h / 2);
+      c.filter = 'none';
       c.restore();
+      if (k.flat && decay < 0.6) {
+        c.globalCompositeOperation = 'lighter';
+        this.glow(this.atlas.glow.orange, k.x + Math.sin(this.t * 9 + k.x) * 2, k.y - 4, 14 + Math.sin(this.t * 13 + k.y) * 3, 0.25 * (1 - decay / 0.6));
+        c.globalCompositeOperation = 'source-over';
+      }
     }
     c.globalAlpha = 1;
+  }
+
+  private drawLeashes() {
+    const c = this.ctx;
+    const G = this.game;
+    for (const z of G.zombies) {
+      if (z.leash === null || z.doomed) continue;
+      const o = G.zombies.find(q => q.id === z.leash && !q.doomed);
+      if (!o) continue;
+      const os = this.atlas.sprites[o.sprite];
+      const hx = o.x + o.facing * os.w * 0.3, hy = o.y - os.h * 0.05;
+      const dx = z.x, dy = z.y - this.atlas.sprites[z.sprite].h * 0.2;
+      c.strokeStyle = 'rgba(255,90,170,0.7)';
+      c.lineWidth = 1.5;
+      c.beginPath(); c.moveTo(hx, hy); c.quadraticCurveTo((hx + dx) / 2, Math.max(hy, dy) + 14, dx, dy); c.stroke();
+    }
+  }
+
+  private drawWreck() {
+    const G = this.game;
+    const W = G.wreck!;
+    const c = this.ctx;
+    const S = W.scale;
+    c.save();
+    c.translate(W.x, W.y);
+    c.scale(S, S * 0.55);
+    c.globalAlpha = 0.9;
+    c.fillStyle = '#07080c';
+    c.beginPath(); c.ellipse(0, 40, 170, 60, 0, 0, Math.PI * 2); c.fill();
+    // scattered plating
+    const plates = [[-90, 10, 0.3], [70, 30, -0.4], [-20, 60, 0.1], [120, -10, 0.8], [-140, 50, -0.6], [20, -20, 0.2]];
+    for (const [px, py, r] of plates) {
+      c.save(); c.translate(px, py); c.rotate(r);
+      c.fillStyle = '#1a2030'; c.fillRect(-28, -14, 56, 28);
+      c.fillStyle = 'rgba(61,246,255,0.15)'; c.fillRect(-28, -14, 56, 3);
+      c.restore();
+    }
+    c.fillStyle = '#121722';
+    c.beginPath(); c.moveTo(-70, -20); c.lineTo(70, -30); c.lineTo(52, 50); c.lineTo(-52, 60); c.closePath(); c.fill();
+    c.restore();
+    c.globalCompositeOperation = 'lighter';
+    const fl = 0.5 + Math.sin(this.t * 11) * 0.2 + Math.sin(this.t * 23) * 0.1;
+    this.glow(this.atlas.glow.orange, W.x - 30 * S, W.y, 40 * S, 0.35 * fl);
+    this.glow(this.atlas.glow.orange, W.x + 50 * S, W.y + 10 * S, 30 * S, 0.3 * fl);
+    this.glow(this.atlas.glow.red, W.x, W.y + 4 * S, 18 * S, 0.4 + Math.sin(this.t * 3) * 0.2);
+    c.globalCompositeOperation = 'source-over';
+    c.globalAlpha = 1;
+    if (Math.random() < 0.3) G.particles.push({ x: W.x + (Math.random() - 0.5) * 120 * S, y: W.y, vx: (Math.random() - 0.5) * 10, vy: -20 - Math.random() * 20, life: 1.5, max: 1.5, size: 14 + Math.random() * 16, color: '#111', kind: 'smoke', drag: 0.4, grav: -8, rot: 0, vr: 0 });
   }
 
   private drawZombie(z: Zombie) {
     const c = this.ctx;
     const G = this.game;
-    const set = this.atlas.zombies[z.variant];
+    const set = this.atlas.sprites[z.sprite];
     const t = z.phase;
-    const gait = z.behavior === 'sprinter' ? 9 : z.behavior === 'zigzag' ? 7 : 4.5;
-    const frame = Math.floor(t * gait) % 2;
-    const bob = Math.abs(Math.sin(t * gait * Math.PI / 2)) * 2;
+    const body = set.body;
+    const gait = z.latched ? 14 : body === 'dog' ? 10 : body === 'bird' ? 8 : body === 'car' || body === 'cart' || body === 'luggage' || body === 'bumper' ? 12
+      : z.kind === 'runner' ? 9 : z.kind === 'twitcher' ? 7 : z.state === 'charge' ? 12 : body === 'horse' ? 6 : 4.5;
+    const still = z.stun > 0 || z.state === 'tell' || z.state === 'hold' && body !== 'robot';
+    const frame = still && !z.latched ? 0 : Math.floor(t * gait) % 2;
+    const bob = body === 'bird' ? 0 : still ? 0 : Math.abs(Math.sin(t * gait * Math.PI / 2)) * (body === 'car' ? 1 : 2);
     const spawnA = Math.min(1, z.age * 3);
     const doomedT = z.doomed ? Math.max(0, z.deathAt - G.time) : 0;
     const sq = 1 + z.pop * 0.06;
-    const x = Math.round(z.x), y = Math.round(z.y - bob);
+    const alt = z.flying ? 26 + Math.sin(t * 3) * 5 : 0;
+    const x = Math.round(z.x), y = Math.round(z.y - bob - alt);
 
-    // shadow
-    c.globalAlpha = 0.55 * spawnA;
-    c.drawImage(this.atlas.glow.shadow, x - set.w * 0.55, z.y + set.h * 0.32, set.w * 1.1, set.h * 0.32);
+    // shadow (stays on the ground for fliers)
+    c.globalAlpha = (z.flying ? 0.35 : 0.55) * spawnA;
+    c.drawImage(this.atlas.glow.shadow, z.x - set.w * 0.55, z.y + set.h * 0.32 - (z.flying ? set.h * 0.2 : 0), set.w * 1.1, set.h * 0.32);
 
     c.save();
     c.translate(x, y);
-    if (z.behavior === 'zigzag') c.rotate(Math.sin(t * 12) * 0.08);
+    if (z.kind === 'twitcher') c.rotate(Math.sin(t * 12) * 0.08);
+    if (z.latched) c.rotate(Math.sin(t * 40) * 0.12);
+    if (body === 'horse' && z.state === 'tell') { c.rotate(-0.35 * z.facing); c.translate(0, -6); }
+    if (z.state === 'tell' && (body === 'car' || body === 'bumper')) c.translate(Math.sin(this.t * 60) * 1.2, 0);
+    if (z.kind === 'gator' && z.state === 'charge') c.scale(1.05, 0.95);
     c.scale(z.facing * sq, 1 / sq);
     c.globalAlpha = spawnA;
     c.drawImage(set.frames[frame], -set.w / 2, -set.h / 2);
-    const fl = Math.max(z.flash, z.doomed ? 0.6 + Math.sin(doomedT * 80) * 0.4 : 0);
+    const tellFlash = z.state === 'tell' ? (Math.sin(this.t * 22) > 0 ? 0.35 : 0) : z.charging > 0 ? 0.25 + Math.sin(this.t * 30) * 0.15 : 0;
+    const fl = Math.max(z.flash, tellFlash, z.doomed ? 0.6 + Math.sin(doomedT * 80) * 0.4 : 0);
     if (fl > 0.02) {
       c.globalAlpha = fl * spawnA;
       c.drawImage(set.flash[frame], -set.w / 2, -set.h / 2);
     }
     c.restore();
 
-    // eye glow + carrier pack glow
+    // eye glow, carrier pack glow, telegraphs
     c.globalCompositeOperation = 'lighter';
-    const s = this.atlas.scale;
-    const ey = y - set.h / 2 + 4.5 * s;
-    const eyeImg = z.variant === 'runner' ? this.atlas.glow.yellow : z.variant === 'twitcher' ? this.atlas.glow.cyan : z.variant === 'carrier' ? this.atlas.glow.magenta : this.atlas.glow.red;
-    this.glow(eyeImg, x, ey, 9 * s / 3 * 2.2, 0.55 * spawnA);
+    const s = set.px;
+    const ex = x + (set.eye[0] - set.w / 2) * z.facing, ey = y - set.h / 2 + set.eye[1];
+    const eyeImg = this.atlas.softGlow(rgba(set.eyeColor, 0.85));
+    const eyeR = body === 'car' ? 22 * s / 3 : 9 * s / 3 * 2.2;
+    this.glow(eyeImg, ex, ey, eyeR, (body === 'car' ? 0.8 : 0.55) * spawnA);
+    if (body === 'car' && z.state === 'tell') {
+      // headlight cone toward the player
+      const P = G.player;
+      const a = Math.atan2(P.y - z.y, P.x - z.x);
+      for (let i = 1; i <= 4; i++) this.glow(this.atlas.glow.yellow, ex + Math.cos(a) * i * 26, ey + Math.sin(a) * i * 26, 18 + i * 8, 0.12);
+      if (Math.random() < 0.4) G.particles.push({ x: x - z.facing * set.w * 0.5, y: y + set.h * 0.2, vx: -z.facing * 40, vy: -10, life: 0.6, max: 0.6, size: 8 + Math.random() * 6, color: '#222', kind: 'smoke', drag: 0.3, grav: -10, rot: 0, vr: 0 });
+    }
+    if (z.charging > 0) {
+      const col = z.kind === 'robot' ? this.atlas.glow.red : this.atlas.glow.purple;
+      this.glow(col, x + z.facing * set.w * 0.35, y, 12 + (1 - z.charging / 0.7) * 22, 0.8);
+    }
     if (z.carrier) {
       const col = WEAPONS[z.carrier].color;
       const pulse = 0.5 + Math.sin(this.t * 6 + z.id) * 0.25;
@@ -450,6 +468,20 @@ export class Renderer {
     }
     c.globalCompositeOperation = 'source-over';
     c.globalAlpha = 1;
+    if (z.stun > 0 && !z.doomed) {
+      // dizzy stars
+      for (let i = 0; i < 3; i++) {
+        const a = this.t * 6 + i * 2.1;
+        c.fillStyle = i % 2 ? '#ffd54a' : '#ffffff';
+        c.fillRect(x + Math.cos(a) * 12 - 1.5, y - set.h / 2 - 6 + Math.sin(a) * 4 - 1.5, 3, 3);
+      }
+    }
+    if (z.kind === 'horse' && z.state === 'tell' || z.kind === 'car' && z.state === 'tell') {
+      c.font = `700 ${G.layout.compact ? 14 : 18}px ${DISPLAY}`;
+      c.textAlign = 'center';
+      c.fillStyle = Math.sin(this.t * 20) > 0 ? '#ff3a4a' : '#ffd54a';
+      c.fillText('!', x, y - set.h / 2 - 2);
+    }
   }
 
   private drawPlayer() {
@@ -564,18 +596,50 @@ export class Renderer {
       }
       c.setLineDash([]);
     }
+    for (const z of G.zombies) {
+      if (z.charging <= 0 || z.doomed) continue;
+      c.setLineDash([4, 8]);
+      c.lineDashOffset = -this.t * 60;
+      c.strokeStyle = z.kind === 'robot' ? 'rgba(255,60,80,0.35)' : 'rgba(176,77,255,0.35)';
+      c.lineWidth = 1.5;
+      c.beginPath(); c.moveTo(z.x, z.y - 10); c.lineTo(G.player.x, G.player.y); c.stroke();
+      c.setLineDash([]);
+    }
     for (const l of G.lasers) {
       const sp = Math.hypot(l.vx, l.vy) || 1;
       const ux = l.vx / sp, uy = l.vy / sp;
-      c.strokeStyle = rgba('#ff2a3a', 0.9);
-      c.lineWidth = 6;
+      if (l.kind === 'gas') {
+        const r = l.r * (1 + Math.sin(this.t * 6 + l.x) * 0.1);
+        this.glow(this.atlas.glow.purple, l.x, l.y, r * 1.8, 0.35);
+        this.glow(this.atlas.glow.green, l.x + Math.sin(this.t * 3) * 4, l.y, r * 1.1, 0.25);
+        continue;
+      }
+      if (l.kind === 'missile') {
+        c.globalCompositeOperation = 'source-over';
+        c.save(); c.translate(l.x, l.y); c.rotate(Math.atan2(uy, ux));
+        c.fillStyle = '#0a0c10'; c.fillRect(-13, -5, 24, 10);
+        c.fillStyle = '#c8d4e6'; c.fillRect(-11, -3.5, 18, 7);
+        c.fillStyle = '#ff3a4a'; c.beginPath(); c.moveTo(7, -3.5); c.lineTo(13, 0); c.lineTo(7, 3.5); c.closePath(); c.fill();
+        c.fillStyle = '#5a6478'; c.fillRect(-13, -7, 5, 14);
+        c.restore();
+        c.globalCompositeOperation = 'lighter';
+        const fl = 0.7 + Math.random() * 0.3;
+        this.glow(this.atlas.glow.orange, l.x - ux * 16, l.y - uy * 16, 16 * fl, 0.9);
+        this.glow(this.atlas.glow.white, l.x - ux * 14, l.y - uy * 14, 6, 0.8);
+        this.glow(this.atlas.glow.red, l.x, l.y, 26 + Math.sin(this.t * 20) * 4, 0.25);
+        continue;
+      }
+      const col = l.kind === 'bolt' ? '#ff5a3a' : '#ff2a3a';
+      const len = l.kind === 'bolt' ? 22 : 46;
+      c.strokeStyle = rgba(col, 0.9);
+      c.lineWidth = l.kind === 'bolt' ? 4 : 6;
       c.globalAlpha = 0.5;
-      c.beginPath(); c.moveTo(l.x - ux * 46, l.y - uy * 46); c.lineTo(l.x, l.y); c.stroke();
+      c.beginPath(); c.moveTo(l.x - ux * len, l.y - uy * len); c.lineTo(l.x, l.y); c.stroke();
       c.globalAlpha = 1;
       c.strokeStyle = '#ffd0d4';
       c.lineWidth = 2;
-      c.beginPath(); c.moveTo(l.x - ux * 30, l.y - uy * 30); c.lineTo(l.x, l.y); c.stroke();
-      this.glow(this.atlas.glow.red, l.x, l.y, 22, 0.9);
+      c.beginPath(); c.moveTo(l.x - ux * len * 0.65, l.y - uy * len * 0.65); c.lineTo(l.x, l.y); c.stroke();
+      this.glow(this.atlas.glow.red, l.x, l.y, l.kind === 'bolt' ? 14 : 22, 0.9);
     }
   }
 
@@ -599,9 +663,14 @@ export class Renderer {
       if (p.kind === 'ember') {
         c.globalAlpha = k;
         c.fillStyle = p.color;
-        const s = p.size * (0.5 + k * 0.5);
-        c.fillRect(p.x - s / 2, p.y - s / 2, s, s);
-        this.glow(this.atlas.glow.orange, p.x, p.y, s * 3, k * 0.35);
+        // streaked, round-capped ember: reads as hot sparks, never as squares
+        const s = Math.max(0.8, p.size * (0.35 + k * 0.4));
+        c.strokeStyle = p.color;
+        c.lineCap = 'round';
+        c.lineWidth = s;
+        c.beginPath(); c.moveTo(p.x, p.y); c.lineTo(p.x - p.vx * 0.022, p.y - p.vy * 0.022); c.stroke();
+        c.lineCap = 'butt';
+        this.glow(this.atlas.glow.orange, p.x, p.y, s * 4, k * 0.3);
         continue;
       }
       if (p.kind === 'smoke') {
@@ -613,11 +682,11 @@ export class Renderer {
       c.fillStyle = p.color;
       if (p.kind === 'gib' || p.kind === 'debris' || p.kind === 'shell') {
         c.save(); c.translate(p.x, p.y); c.rotate(p.rot);
-        c.fillRect(-p.size / 2, -p.size / 3, p.size, p.size * 0.66);
-        if (p.kind === 'gib') { c.fillStyle = '#e8d7c0'; c.fillRect(-1, -1, 2, 2); }
+        c.beginPath(); c.ellipse(0, 0, p.size / 2, p.size / 3, 0, 0, Math.PI * 2); c.fill();
+        if (p.kind === 'gib') { c.fillStyle = '#e8d7c0'; c.beginPath(); c.arc(0, 0, 1, 0, Math.PI * 2); c.fill(); }
         c.restore();
       } else {
-        c.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+        c.beginPath(); c.arc(p.x, p.y, Math.max(0.6, p.size / 2), 0, Math.PI * 2); c.fill();
       }
     }
     c.globalAlpha = 1;
@@ -738,13 +807,17 @@ export class Renderer {
   private drawTag(z: Zombie, locked: boolean, next: boolean, anyLock: boolean, placed: Rect[]) {
     if (z.doomed) return;
     const c = this.ctx;
-    const set = this.atlas.zombies[z.variant];
+    const set = this.atlas.sprites[z.sprite];
     const { fs, font } = this.tagFont();
     const cw = this.cw(font);
     const w = Math.ceil(z.word.length * cw + 16);
     const h = fs + 11;
-    const extra = z.carrier ? fs * 0.7 : 0;
-    const desired = { x: z.x - w / 2, y: z.y - set.h / 2 - h - 8 - extra, w, h: h + extra };
+    const label = z.carrier ? `◆ ${WEAPONS[z.carrier].short}` : z.words.length ? `◈ ARMOR ×${z.words.length + 1}` : z.attack === 'ranged' ? '⚠ SHOOTER'
+      : z.state === 'tell' ? '⚠ CHARGING' : z.kind === 'brute' ? '☠ BRUTE' : undefined;
+    const labelColor = z.carrier ? WEAPONS[z.carrier].color : z.words.length ? '#c8d4e6' : z.kind === 'brute' ? '#ff9a3d' : '#ff6a78';
+    const extra = label ? fs * 0.7 : 0;
+    const alt = z.flying ? 26 : 0;
+    const desired = { x: z.x - w / 2, y: z.y - alt - set.h / 2 - h - 8 - extra, w, h: h + extra };
     const r = this.place(desired, placed);
     if (!z.tagInit) { z.tagX = r.x; z.tagY = r.y; z.tagInit = true; }
     z.tagX += (r.x - z.tagX) * 0.35;
@@ -754,22 +827,23 @@ export class Renderer {
     c.globalAlpha = 0.25 * spawnA;
     c.strokeStyle = locked ? '#3df6ff' : '#8aa0b8';
     c.lineWidth = 1;
-    c.beginPath(); c.moveTo(z.tagX + w / 2, z.tagY + extra + h); c.lineTo(z.x, z.y - set.h / 2 + 2); c.stroke();
+    c.beginPath(); c.moveTo(z.tagX + w / 2, z.tagY + extra + h); c.lineTo(z.x, z.y - alt - set.h / 2 + 2); c.stroke();
     c.globalAlpha = 1;
     const state: 'lock' | 'next' | 'idle' | 'dim' = locked ? 'lock' : anyLock ? 'dim' : next ? 'next' : 'idle';
     const carrierCol = z.carrier ? WEAPONS[z.carrier].color : null;
     c.globalAlpha = spawnA;
     this.drawWordPlate(z.word, locked ? z.progress : 0, { x: z.tagX, y: z.tagY + extra, w, h }, {
       state, carrier: carrierCol, pop: locked ? z.pop : 0,
-      label: z.carrier ? `◆ ${WEAPONS[z.carrier].short}` : undefined, labelColor: carrierCol ?? undefined,
+      label, labelColor,
     });
   }
 
   private drawLockBrackets(z: Zombie) {
     const c = this.ctx;
-    const set = this.atlas.zombies[z.variant];
+    const set = this.atlas.sprites[z.sprite];
     const pad = 6 + Math.sin(this.t * 8) * 2;
-    const x0 = z.x - set.w / 2 - pad, y0 = z.y - set.h / 2 - pad, x1 = z.x + set.w / 2 + pad, y1 = z.y + set.h / 2 + pad;
+    const zy = z.y - (z.flying ? 26 : 0);
+    const x0 = z.x - set.w / 2 - pad, y0 = zy - set.h / 2 - pad, x1 = z.x + set.w / 2 + pad, y1 = zy + set.h / 2 + pad;
     const L = 8;
     c.strokeStyle = '#3df6ff';
     c.lineWidth = 2;
@@ -814,18 +888,35 @@ export class Renderer {
       }
       return { ex, ey };
     };
-    const walk = Math.sin(b.t * 3) * 6;
-    // legs
+    // legs: hip -> knee -> foot, driven by the walk cycle so it stomps instead of floating
     const lf = part('leftFoot'), rf = part('rightFoot');
-    const l1 = limb(-36, 70, -58, 112 + walk * 0.3, 30, lf.destroyed);
-    const r1 = limb(36, 70, 58, 112 - walk * 0.3, 30, rf.destroyed);
-    if (!lf.destroyed) { c.fillStyle = edge; c.fillRect(l1.ex - 26, l1.ey - 4, 44, 18); c.fillStyle = steel; c.fillRect(l1.ex - 23, l1.ey - 1, 38, 12); }
-    if (!rf.destroyed) { c.fillStyle = edge; c.fillRect(r1.ex - 18, r1.ey - 4, 44, 18); c.fillStyle = steel; c.fillRect(r1.ex - 15, r1.ey - 1, 38, 12); }
-    // arms
+    const bodyDip = Math.abs(Math.sin(b.walk * Math.PI)) * -4;
+    c.translate(0, bodyDip);
+    const leg = (side: -1 | 1, p: BossPart) => {
+      const [fx, fy] = G.partOffset(p.part);
+      const hx = side * 36, hy = 70;
+      const kx = (hx + fx) / 2 + side * 14, ky = (hy + fy) / 2 - 6 - bodyDip;
+      const fy2 = fy - bodyDip;
+      if (p.destroyed) { limb(hx, hy, kx, ky, 30, true); return; }
+      limb(hx, hy, kx, ky, 30, false);
+      const e = limb(kx, ky, fx, fy2, 26, false);
+      c.fillStyle = edge; c.fillRect(e.ex - 22 + side * 4, e.ey - 4, 44, 18);
+      c.fillStyle = steel; c.fillRect(e.ex - 19 + side * 4, e.ey - 1, 38, 12);
+      c.fillStyle = 'rgba(255,58,74,0.5)'; c.fillRect(e.ex - 19 + side * 4, e.ey + 9, 38, 2);
+    };
+    leg(-1, lf); leg(1, rf);
+    // arms: shoulder -> elbow -> claw; hands reach out for swipes and grabs
     const lh = part('leftHand'), rh = part('rightHand');
-    const sway = Math.sin(b.t * 2.4) * 8;
-    const la = limb(-62, -30, -122, 4 + sway, 24, lh.destroyed);
-    const ra = limb(62, -30, 122, 4 - sway, 24, rh.destroyed);
+    const arm = (side: -1 | 1, p: BossPart) => {
+      const [hx2, hy2] = G.partOffset(p.part);
+      const sx0 = side * 62, sy0 = -30;
+      const ex0 = (sx0 + hx2) / 2 + side * 18, ey0 = (sy0 + hy2) / 2 + 14;
+      if (p.destroyed) return limb(sx0, sy0, ex0, ey0, 24, true);
+      limb(sx0, sy0, ex0, ey0, 26, false);
+      return limb(ex0, ey0, hx2, hy2 - bodyDip, 22, false);
+    };
+    const la = arm(-1, lh);
+    const ra = arm(1, rh);
     const claw = (cx: number, cy: number, dir: number) => {
       c.fillStyle = edge;
       c.beginPath(); c.arc(cx, cy, 20, 0, Math.PI * 2); c.fill();
@@ -836,6 +927,13 @@ export class Renderer {
     };
     if (!lh.destroyed) claw(la.ex, la.ey, -1);
     if (!rh.destroyed) claw(ra.ex, ra.ey, 1);
+    // shoulder missile pods
+    const podGlow = b.attack?.kind === 'missile' ? 0.5 + Math.sin(this.t * 30) * 0.5 : 0;
+    for (const side of [-1, 1]) {
+      c.fillStyle = edge; c.fillRect(side * 62 - 18, -78, 36, 26);
+      c.fillStyle = '#2a3448'; c.fillRect(side * 62 - 15, -75, 30, 20);
+      for (let i = 0; i < 3; i++) { c.fillStyle = podGlow > 0 ? `rgba(255,${120 + podGlow * 100},60,1)` : '#0b0e15'; c.fillRect(side * 62 - 12 + i * 9, -71, 6, 6); }
+    }
     // torso
     c.fillStyle = edge;
     c.beginPath(); c.moveTo(-74, -54); c.lineTo(74, -54); c.lineTo(52, 84); c.lineTo(-52, 84); c.closePath(); c.fill();
@@ -885,6 +983,27 @@ export class Renderer {
       const pos = G.partPos(p);
       this.glow(this.atlas.glow.orange, pos.x, pos.y, 18 * S, 0.3 + Math.random() * 0.2);
     }
+    // attack telegraphs
+    const A = b.attack;
+    const P = G.player;
+    if (A && (A.kind === 'swipe' || A.kind === 'grab') && !A.acted) {
+      const k = Math.min(1, A.t / A.tell);
+      const hp = G.partPos(b.parts.find(p => p.part === A.hand)!);
+      c.globalCompositeOperation = 'source-over';
+      c.strokeStyle = rgba('#ff3a4a', 0.25 + k * 0.6);
+      c.lineWidth = 2 + k * 3;
+      c.setLineDash([10, 8]); c.lineDashOffset = -this.t * 90;
+      if (A.kind === 'swipe') {
+        c.beginPath(); c.arc(P.x, P.y, (60 - k * 24) * (G.layout.compact ? 0.8 : 1), 0, Math.PI * 2); c.stroke();
+      } else {
+        c.beginPath(); c.moveTo(hp.x, hp.y); c.lineTo(P.x, P.y); c.stroke();
+        c.beginPath(); c.arc(P.x, P.y, 30 + (1 - k) * 30, 0, Math.PI * 2); c.stroke();
+      }
+      c.setLineDash([]);
+      c.globalCompositeOperation = 'lighter';
+      this.glow(this.atlas.glow.red, hp.x, hp.y, 30 + k * 30, 0.4 + k * 0.5);
+    }
+    if (A?.kind === 'missile') for (const pod of G.missilePods()) this.glow(this.atlas.glow.orange, pod.x, pod.y, 20 + Math.min(1, A.t / A.tell) * 30, 0.8);
     // weak point marker on the next part
     const nextP = b.stage === 'fight' ? G.nextPart() : null;
     if (nextP) {
@@ -994,15 +1113,17 @@ export class Renderer {
     }
     // chapter + mode
     const dcol = DIFFICULTY_CONFIG[G.difficulty].color;
+    const I = G.info;
     if (compact) {
-      this.label(`CH ${G.level}`, w / 2, 44, 10, 'rgba(255,213,74,0.9)', 'center');
+      this.label(`${I.def.name.toUpperCase()} · ${I.levelInWorld}/10`, w / 2, 44, 9, rgba(I.world.color, 0.9), 'center', 1.5);
     } else {
-      const cw = this.label(`CHAPTER ${G.level}`, pad, 104, 11, 'rgba(255,213,74,0.9)', 'left', 3);
-      this.label(G.difficulty.toUpperCase(), pad + cw + 12, 104, 11, dcol, 'left', 3);
+      const cw = this.label(`LVL ${I.levelInWorld}/10`, pad, 104, 11, 'rgba(255,213,74,0.9)', 'left', 3);
+      const nw = this.label(I.def.name.toUpperCase(), pad + cw + 12, 104, 11, rgba(I.world.color, 0.95), 'left', 2);
+      this.label(G.difficulty.toUpperCase(), pad + cw + nw + 24, 104, 10, dcol, 'left', 3);
     }
 
     // boss progress bar
-    const thr = BOSS_THRESHOLD[G.difficulty];
+    const thr = G.levelTarget;
     const prog = G.boss.active ? 1 : Math.min(1, G.killsTowardsBoss / thr);
     const bw = compact ? w - pad * 2 : Math.min(360, w * 0.3);
     const bx = compact ? pad : w / 2 - bw / 2;
@@ -1017,7 +1138,7 @@ export class Renderer {
     c.globalCompositeOperation = 'source-over';
     c.globalAlpha = 1;
     if (!compact) {
-      const status = G.boss.active ? (G.boss.stage === 'sentence' ? 'EXECUTE' : 'BOSS FIGHT') : G.time < G.chapterUntil && G.level > 1 ? 'CHAPTER BREAK' : `BOSS IN ${Math.max(0, thr - G.killsTowardsBoss)}`;
+      const status = G.boss.active ? (G.boss.stage === 'sentence' ? 'EXECUTE' : G.boss.name) : G.phase === 'exit' ? 'LEVEL CLEAR' : `BOSS IN ${Math.max(0, thr - G.killsTowardsBoss)}`;
       this.label(status, w / 2, by - 8, 11, G.boss.active ? '#ff6a78' : 'rgba(140,170,200,0.8)', 'center', 3);
     }
 
@@ -1103,7 +1224,7 @@ export class Renderer {
     const typed = G.typed;
     const P = G.player;
     const bufY = Math.min(h - (compact ? 10 : 16), P.y + this.atlas.player.height / 2 + (compact ? 22 : 34));
-    if (typed && !(G.boss.active && G.boss.stage === 'sentence')) {
+    if (typed && !G.grab && !(G.boss.active && G.boss.stage === 'sentence')) {
       const fs = compact ? 17 : 24;
       c.font = `700 ${fs}px ${MONO}`;
       c.textAlign = 'center';
@@ -1203,8 +1324,11 @@ export class Renderer {
     c.fillRect(this.w / 2 - lw / 2, cy - bandH / 2, lw, 1);
     c.fillRect(this.w / 2 - lw / 2, cy + bandH / 2 - 1, lw, 1);
     this.label(B.kicker, this.w / 2, cy - (compact ? 22 : 32), compact ? 10 : 12, B.color, 'center', 6);
-    const fs = compact ? 30 : 54;
+    let fs = compact ? 30 : 54;
     c.font = `700 ${fs}px ${DISPLAY}`;
+    (c as any).letterSpacing = `${compact ? 3 : 6}px`;
+    const tw = c.measureText(B.title).width;
+    if (tw > this.w - 32) { fs = Math.floor(fs * (this.w - 32) / tw); c.font = `700 ${fs}px ${DISPLAY}`; }
     c.textAlign = 'center';
     (c as any).letterSpacing = `${(compact ? 3 : 6) + (1 - ease) * 20}px`;
     c.globalCompositeOperation = 'lighter';
@@ -1218,6 +1342,88 @@ export class Renderer {
     (c as any).letterSpacing = '0px';
     if (B.sub) this.label(B.sub, this.w / 2, cy + (compact ? 34 : 48), compact ? 10 : 13, 'rgba(220,230,245,0.8)', 'center', 3);
     c.restore();
+  }
+
+  /** Letterbox bars and a tunnel vignette for the close-up struggle. */
+  private drawCinema(k: number) {
+    const c = this.ctx;
+    const { w, h } = this;
+    const bar = h * 0.09 * k;
+    c.fillStyle = '#000';
+    c.fillRect(0, 0, w, bar);
+    c.fillRect(0, h - bar, w, bar);
+    const gr = c.createRadialGradient(w / 2, h * 0.45, Math.min(w, h) * 0.18, w / 2, h * 0.45, Math.max(w, h) * 0.6);
+    gr.addColorStop(0, 'rgba(0,0,0,0)');
+    gr.addColorStop(1, `rgba(20,0,4,${0.75 * k})`);
+    c.fillStyle = gr;
+    c.fillRect(0, 0, w, h);
+    const G = this.game;
+    if (G.biteFlash > 0) {
+      c.fillStyle = `rgba(160,0,16,${G.biteFlash * 0.28})`;
+      c.fillRect(0, 0, w, h);
+    }
+  }
+
+  /** The break-free prompt: big word, per-letter progress, draining countdown ring. */
+  private drawGrab() {
+    const G = this.game;
+    const g = G.grab!;
+    const c = this.ctx;
+    const compact = G.layout.compact;
+    const { w, h } = this;
+    const k = Math.min(1, G.cine * 1.4);
+    const word = g.words[g.index];
+    const fs = compact ? 30 : 46;
+    const font = `700 ${fs}px ${MONO}`;
+    const cw = this.cw(font);
+    const ww = word.length * cw;
+    const cx = w / 2;
+    const cy = compact ? Math.max(G.layout.topPad + 40, h * 0.16) : h * 0.74;
+    const left = Math.max(0, 1 - g.t / g.max);
+    const urgent = left < 0.35;
+    c.save();
+    c.globalAlpha = k;
+    // panel
+    const pw = Math.max(ww + 60, compact ? 220 : 320), ph = fs + (compact ? 56 : 70);
+    this.rr(cx - pw / 2, cy - ph / 2, pw, ph, 10);
+    c.fillStyle = 'rgba(10,2,6,0.88)';
+    c.fill();
+    c.strokeStyle = urgent && Math.sin(this.t * 24) > 0 ? '#ffffff' : '#ff3a4a';
+    c.lineWidth = 2;
+    c.stroke();
+    // countdown bar
+    c.fillStyle = 'rgba(255,255,255,0.1)';
+    c.fillRect(cx - pw / 2 + 12, cy + ph / 2 - 10, pw - 24, 4);
+    c.fillStyle = urgent ? '#ff3a4a' : '#ffd54a';
+    c.fillRect(cx - pw / 2 + 12, cy + ph / 2 - 10, (pw - 24) * left, 4);
+    // header
+    const title = g.zid === -1 && !compact ? 'GRABBED · BREAK FREE' : 'BREAK FREE';
+    this.label(title, cx, cy - ph / 2 + (compact ? 16 : 20), compact ? 10 : 12, '#ff6a78', 'center', 4);
+    if (g.words.length > 1) this.label(`${g.index + 1} / ${g.words.length}`, cx + pw / 2 - 14, cy - ph / 2 + (compact ? 16 : 20), compact ? 9 : 11, '#ffd54a', 'right', 2);
+    this.label(`${(g.max - g.t).toFixed(1)}s`, cx - pw / 2 + 14, cy - ph / 2 + (compact ? 16 : 20), compact ? 9 : 11, urgent ? '#ff3a4a' : 'rgba(255,255,255,0.7)', 'left', 1);
+    // word
+    c.font = font;
+    c.textAlign = 'left';
+    c.textBaseline = 'middle';
+    const jit = urgent ? Math.sin(this.t * 70) * 1.5 : 0;
+    const tx = cx - ww / 2 + jit, ty = cy + (compact ? 6 : 8);
+    for (let i = 0; i < word.length; i++) {
+      const lx = tx + i * cw;
+      if (i < g.progress) { c.fillStyle = '#41ffb4'; c.fillText(word[i].toUpperCase(), lx, ty); }
+      else if (i === g.progress) {
+        c.fillStyle = '#ffffff'; c.fillText(word[i].toUpperCase(), lx, ty);
+        c.fillStyle = rgba('#ff3a4a', 0.6 + Math.sin(this.t * 14) * 0.4);
+        c.fillRect(lx, ty + fs * 0.45, cw - 2, 3);
+      } else { c.fillStyle = 'rgba(255,220,225,0.55)'; c.fillText(word[i].toUpperCase(), lx, ty); }
+    }
+    c.textBaseline = 'alphabetic';
+    // hearts strip so you know what's at stake
+    const hp = compact ? 2 : 3;
+    const hx = cx - (MAX_LIVES * 8 * hp + (MAX_LIVES - 1) * 3) / 2;
+    const hy = cy + ph / 2 + 10;
+    for (let i = 0; i < MAX_LIVES; i++) this.heart(hx + i * (8 * hp + 3), hy, hp, i < G.lives, i === G.lives - 1 && urgent ? 0.8 : 0);
+    c.restore();
+    c.globalAlpha = 1;
   }
 
   private drawPost() {
@@ -1252,6 +1458,10 @@ export class Renderer {
     }
     if (G.over) {
       c.fillStyle = `rgba(20,0,4,${Math.min(0.6, G.overT * 0.5)})`;
+      c.fillRect(0, 0, w, h);
+    }
+    if (G.fade > 0.001 && (G.running || G.phase === 'exit')) {
+      c.fillStyle = `rgba(2,3,6,${Math.min(1, G.fade)})`;
       c.fillRect(0, 0, w, h);
     }
     // scanlines

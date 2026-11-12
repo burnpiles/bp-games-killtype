@@ -355,6 +355,70 @@ export class AudioEngine {
     this.tone(45, 2.4, { type: 'sine', gain: 0.4, endFreq: 22, when: t + 0.9 });
   }
 
+  // ---- close-quarters / new enemies ----
+  grabStart() {
+    if (!this.ok) return;
+    this.duck(0.3, 0.8);
+    this.tone(220, 0.5, { type: 'sawtooth', gain: 0.18, endFreq: 110, filter: 1400, reverb: 0.3 });
+    this.tone(233, 0.5, { type: 'sawtooth', gain: 0.14, endFreq: 116, filter: 1400 });
+    this.noise(0.35, { type: 'bandpass', freq: 900, endFreq: 300, q: 2, gain: 0.25 });
+  }
+  bite() {
+    if (!this.ok) return;
+    this.noise(0.12, { type: 'bandpass', freq: 1800, endFreq: 600, q: 3, gain: 0.35 });
+    this.tone(90, 0.16, { type: 'square', gain: 0.18, endFreq: 50, filter: 600 });
+  }
+  breakFree() {
+    if (!this.ok) return;
+    this.tone(180, 0.25, { type: 'square', gain: 0.22, endFreq: 520, filter: 2600 });
+    this.noise(0.22, { type: 'highpass', freq: 800, endFreq: 3000, gain: 0.25, reverb: 0.25 });
+    this.tone(70, 0.3, { gain: 0.45, endFreq: 30 });
+  }
+  armorBreak() {
+    if (!this.ok) return;
+    this.noise(0.2, { type: 'highpass', freq: 2500, endFreq: 1200, gain: 0.3 });
+    this.tone(880, 0.18, { type: 'triangle', gain: 0.14, endFreq: 440, reverb: 0.3 });
+  }
+  enemyShot() {
+    if (!this.ok) return;
+    this.tone(1200, 0.16, { type: 'square', gain: 0.08, endFreq: 300, filter: 3000 });
+  }
+  enemyCharge() {
+    if (!this.ok) return;
+    this.tone(300, 0.5, { type: 'sine', gain: 0.07, endFreq: 1100 });
+  }
+  missileLaunch() {
+    if (!this.ok) return;
+    this.noise(0.6, { type: 'bandpass', freq: 600, endFreq: 2400, q: 1, gain: 0.25, reverb: 0.2 });
+    this.tone(160, 0.4, { type: 'sawtooth', gain: 0.08, endFreq: 420, filter: 1200 });
+  }
+  swipeTell() {
+    if (!this.ok) return;
+    this.tone(140, 0.7, { type: 'sawtooth', gain: 0.1, endFreq: 260, filter: 800 });
+  }
+  swipe() {
+    if (!this.ok) return;
+    this.noise(0.35, { type: 'bandpass', freq: 400, endFreq: 2600, q: 0.8, gain: 0.4 });
+  }
+  bark() {
+    if (!this.ok) return;
+    this.tone(420, 0.09, { type: 'square', gain: 0.07, endFreq: 260, filter: 1500 });
+    this.tone(400, 0.08, { type: 'square', gain: 0.06, endFreq: 240, filter: 1500, when: this.ctx!.currentTime + 0.12 });
+  }
+  engine() {
+    if (!this.ok) return;
+    this.tone(55, 0.9, { type: 'sawtooth', gain: 0.12, endFreq: 140, filter: 500 });
+  }
+  crash() {
+    if (!this.ok) return;
+    this.noise(0.5, { type: 'lowpass', freq: 3000, endFreq: 200, gain: 0.45 });
+    this.tone(80, 0.4, { gain: 0.4, endFreq: 30 });
+  }
+  levelClear() {
+    if (!this.ok) return;
+    [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.5, { type: 'triangle', gain: 0.12, when: this.ctx!.currentTime + i * 0.09, reverb: 0.4 }));
+  }
+
   uiHover() {
     if (!this.ok) return;
     this.tone(1600, 0.04, { type: 'sine', gain: 0.025 });
