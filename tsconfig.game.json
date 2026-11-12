@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "incremental": false },
+  "include": ["client/src/game/**/*", "client/src/App.tsx", "server/**/*", "shared/**/*", "api/**/*"]
+}

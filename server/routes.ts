@@ -1,64 +1,63 @@
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction, RequestHandler } from "express";
 import { storage } from "./storage.js";
 import {
-  insertLeaderboardScoreSchema,
   leaderboardDifficultySchema,
   leaderboardQualificationSchema,
+  leaderboardSubmissionSchema,
+  runStartSchema,
 } from "../shared/schema.js";
+import { consumeNonce, issueRunToken, plausible, rateLimit, verifyRunToken } from "./antiCheat.js";
+
+/** Express 4 does not catch rejected promises; forward them to the error middleware. */
+const route = (fn: (req: Request, res: Response) => Promise<unknown>): RequestHandler =>
+  (req: Request, res: Response, next: NextFunction) => { fn(req, res).catch(next); };
+
+const minutes = (n: number) => n * 60 * 1000;
 
 export async function registerRoutes(app: Express): Promise<void> {
-  // prefix all routes with /api
-
-  app.get("/api/leaderboard", async (_req, res) => {
+  app.get("/api/leaderboard", route(async (_req, res) => {
     const boards = await storage.getAllLeaderboards();
-    res.json({
-      limit: 10,
-      boards,
-    });
-  });
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ limit: 10, boards });
+  }));
 
-  app.get("/api/leaderboard/:difficulty", async (req, res) => {
-    const parsedDifficulty = leaderboardDifficultySchema.safeParse(req.params.difficulty);
-    if (!parsedDifficulty.success) {
-      return res.status(400).json({ message: "Invalid difficulty" });
-    }
+  app.get("/api/leaderboard/:difficulty", route(async (req, res) => {
+    const parsed = leaderboardDifficultySchema.safeParse(req.params.difficulty);
+    if (!parsed.success) return void res.status(400).json({ message: "Invalid difficulty" });
+    const scores = await storage.getLeaderboard(parsed.data);
+    res.json({ difficulty: parsed.data, limit: 10, scores });
+  }));
 
-    const scores = await storage.getLeaderboard(parsedDifficulty.data);
-    res.json({
-      difficulty: parsedDifficulty.data,
-      limit: 10,
-      scores,
-    });
-  });
+  app.post("/api/run", rateLimit({ name: "run", windowMs: minutes(10), max: 60 }), route(async (req, res) => {
+    const parsed = runStartSchema.safeParse(req.body);
+    if (!parsed.success) return void res.status(400).json({ message: "Invalid difficulty" });
+    res.json({ token: issueRunToken(parsed.data.difficulty) });
+  }));
 
-  app.post("/api/leaderboard/qualify", async (req, res) => {
+  app.post("/api/leaderboard/qualify", rateLimit({ name: "qualify", windowMs: minutes(10), max: 60 }), route(async (req, res) => {
     const parsed = leaderboardQualificationSchema.safeParse(req.body);
+    if (!parsed.success) return void res.status(400).json({ message: "Invalid leaderboard qualification payload" });
+    res.json(await storage.qualifiesForLeaderboard(parsed.data));
+  }));
+
+  app.post("/api/leaderboard", rateLimit({ name: "submit", windowMs: minutes(10), max: 10 }), route(async (req, res) => {
+    const parsed = leaderboardSubmissionSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ message: "Invalid leaderboard qualification payload" });
+      return void res.status(400).json({ message: parsed.error.issues[0]?.message ?? "Invalid leaderboard submission" });
     }
+    const { runToken, kills, level: _level, ...entry } = parsed.data;
+    const run = verifyRunToken(runToken, entry.difficulty);
+    if (!run.ok) return void res.status(422).json({ message: run.reason });
+    const problem = plausible({ score: entry.score, wpm: entry.wpm, kills }, run.elapsedMs);
+    if (problem) return void res.status(422).json({ message: `Score rejected: ${problem}` });
 
-    const result = await storage.qualifiesForLeaderboard(parsed.data);
-    res.json(result);
-  });
-
-  app.post("/api/leaderboard", async (req, res) => {
-    const parsed = insertLeaderboardScoreSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ message: "Invalid leaderboard submission" });
-    }
-
-    const qualification = await storage.qualifiesForLeaderboard(parsed.data);
+    const qualification = await storage.qualifiesForLeaderboard(entry);
     if (!qualification.qualifies) {
-      return res.status(409).json({ message: "Score no longer qualifies for the leaderboard" });
+      return void res.status(409).json({ message: "Score no longer qualifies for the leaderboard" });
     }
-
-    const entry = await storage.createLeaderboardScore(parsed.data);
+    consumeNonce(run.nonce);
+    const created = await storage.createLeaderboardScore(entry);
     const boards = await storage.getAllLeaderboards();
-    res.status(201).json({
-      entry,
-      boards,
-      qualification,
-    });
-  });
-
+    res.status(201).json({ entry: created, boards, qualification });
+  }));
 }
