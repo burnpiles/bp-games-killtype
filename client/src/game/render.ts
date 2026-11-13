@@ -330,7 +330,7 @@ export class Renderer {
     c.drawImage(this.vignette, 0, 0, w, h);
 
     if (k > 0.01) this.drawCinema(k);
-    if (G.cine < 0.5) this.drawHud();
+    if (G.cine < 0.5 && !G.demo) this.drawHud();
     if (G.grab) this.drawGrab();
     this.drawBanner();
     this.drawPost();

@@ -126,7 +126,7 @@ export function layoutScene(id: SceneId, w: number, h: number, compact: boolean,
       break;
     case 'claim': {
       const rx = Math.min(w * (compact ? 0.38 : 0.3), 330 * s), ry = Math.min((mid - band) * 0.42, 110 * s);
-      const c: Carousel = { cx: w * 0.5, cy: band + ry + 26 * s, rx, ry, band: 30 * s, slots: compact ? 9 : 14, speed: 0.022 };
+      const c: Carousel = { cx: w * 0.5, cy: band + ry + 26 * s, rx, ry, band: 30 * s, slots: compact ? 9 : 14, speed: 0.05 };
       S.carousels.push(c);
       for (let i = 0; i < c.slots; i++) S.spawns.push({ type: 'emerge', tag: 'suitcase', x: c.cx, y: c.cy, carousel: 0, weight: 0.7 });
       if (!compact) esc(w * 0.09, escLen * 0.8);
@@ -1051,8 +1051,8 @@ export function drawSceneLive(g: G, S: Scene, t: number, burst: Map<string, numb
   }
   // baggage carousel: moving slats and suitcases
   S.carousels.forEach((k, ci) => {
-    const n = Math.round((k.rx + k.ry) * 0.2);
-    g.strokeStyle = 'rgba(160,170,190,0.18)'; g.lineWidth = 1.5 * s;
+    const n = Math.round((k.rx + k.ry) * 0.16);
+    g.strokeStyle = 'rgba(190,200,220,0.42)'; g.lineWidth = 2 * s;
     for (let i = 0; i < n; i++) {
       const u = ((i / n + t * k.speed) % 1 + 1) % 1, a = u * Math.PI * 2;
       g.beginPath(); g.moveTo(k.cx + Math.cos(a) * (k.rx - 1), k.cy + Math.sin(a) * (k.ry - 1)); g.lineTo(k.cx + Math.cos(a) * (k.rx - k.band + 1), k.cy + Math.sin(a) * (k.ry - k.band + 1)); g.stroke();

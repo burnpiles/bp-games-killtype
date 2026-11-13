@@ -34,11 +34,16 @@ export async function registerRoutes(app: Express): Promise<void> {
     res.json({ token: issueRunToken(parsed.data.difficulty) });
   }));
 
-  app.post("/api/leaderboard/qualify", rateLimit({ name: "qualify", windowMs: minutes(10), max: 60 }), route(async (req, res) => {
+  // Single-segment path on purpose: on Vercel, api/[...all].ts only receives one path segment,
+  // so /api/leaderboard/qualify 404s before reaching Express. The nested path stays for local dev.
+  const qualifyHandler = route(async (req, res) => {
     const parsed = leaderboardQualificationSchema.safeParse(req.body);
     if (!parsed.success) return void res.status(400).json({ message: "Invalid leaderboard qualification payload" });
     res.json(await storage.qualifiesForLeaderboard(parsed.data));
-  }));
+  });
+  const qualifyLimit = rateLimit({ name: "qualify", windowMs: minutes(10), max: 60 });
+  app.post("/api/qualify", qualifyLimit, qualifyHandler);
+  app.post("/api/leaderboard/qualify", qualifyLimit, qualifyHandler);
 
   app.post("/api/leaderboard", rateLimit({ name: "submit", windowMs: minutes(10), max: 10 }), route(async (req, res) => {
     const parsed = leaderboardSubmissionSchema.safeParse(req.body);

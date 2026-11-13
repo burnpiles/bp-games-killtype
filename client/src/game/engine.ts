@@ -1,9 +1,10 @@
 // Game simulation. Pure TypeScript, no React: the loop runs on real frame delta
 // with a fixed-step accumulator, so speed is identical at 60/120/144 Hz.
 
+import { finisherFor } from './finishers';
 import {
   BOSS_THRESHOLD, DIFFICULTY_CONFIG, DIFFICULTY_PERSONALITY, MAX_LIVES, WEAPONS, WORDS,
-  BOSS_SENTENCES, comboTier, COMBO_TIERS, pick,
+  comboTier, COMBO_TIERS, pick,
   type Behavior, type Difficulty, type SpecialWeaponId, type WeaponId,
 } from './config';
 import { audio } from './audio';
@@ -210,6 +211,11 @@ export class Game {
   boss: Boss = this.emptyBoss();
 
   onEvent: (e: GameEvent) => void = () => {};
+  /** Attract mode behind the menus: an autopilot plays, the player can't be hurt, nothing is reported. */
+  demo = false;
+  private demoT = 0;
+  private demoKey = 0;
+  private emit(e: GameEvent) { if (!this.demo) this.onEvent(e); }
 
   private emptyBoss(): Boss {
     return {
@@ -291,6 +297,8 @@ export class Game {
 
   // ---------------- lifecycle ----------------
   start(difficulty: Difficulty, world: WorldId) {
+    this.demo = false;
+    audio.quiet = false;
     this.difficulty = difficulty;
     this.world = world;
     this.running = true;
@@ -306,7 +314,7 @@ export class Game {
     this.weapon = 'pistol'; this.ammo = 0; this.weaponTime = 0;
     this.shake = 0; this.flash.a = 0; this.chroma = 0;
     this.prepareLevel();
-    this.onEvent({ type: 'intro', info: this.info, summary: null });
+    this.emit({ type: 'intro', info: this.info, summary: null });
   }
 
   /** Sets up the arena for `this.level` and waits on the story card. */
@@ -345,6 +353,8 @@ export class Game {
   }
 
   stop() {
+    this.demo = false;
+    audio.quiet = false;
     this.running = false;
     this.over = false;
     this.paused = false;
@@ -358,11 +368,50 @@ export class Game {
     this.hitstop = 0; this.slowmo = 0; this.timeScale = 1;
   }
 
+  /** Starts (or switches) the attract-mode run shown behind the menus. */
+  startDemo() {
+    const worlds: WorldId[] = ['mall', 'airport', 'park'];
+    const world = worlds[Math.floor(Math.random() * worlds.length)];
+    this.start('normal', world);
+    this.demo = true;
+    audio.quiet = true;
+    this.level = 1 + Math.floor(Math.random() * 10);
+    this.prepareLevel();
+    this.levelTarget = Infinity;
+    this.phase = 'play';
+    this.fade = 1;
+    this.lastSpawn = this.time - 2;
+    this.demoT = 0;
+    this.demoKey = 1.2;
+  }
+
+  /** Types like a fast, steady player: lock the nearest visible enemy, then finish its word. */
+  private autopilot(dt: number) {
+    this.demoT += dt;
+    if (this.demoT > 32) { this.startDemo(); return; }
+    this.demoKey -= dt;
+    if (this.demoKey > 0) return;
+    this.demoKey = 0.06 + Math.random() * 0.06;
+    if (Math.random() < 0.06) this.demoKey += 0.35; // a breath between words
+    const L = this.layout;
+    const lock = this.zombies.find(z => z.id === this.lockId && !z.doomed);
+    if (lock) { this.type(lock.word[lock.progress]); return; }
+    const P = this.player;
+    let best: Zombie | null = null, bd = Infinity;
+    for (const z of this.zombies) {
+      if (z.doomed || z.emerge > 0 || z.y < L.topPad + 24 || z.x < 10 || z.x > L.w - 10) continue;
+      const d = Math.hypot(z.x - P.x, z.y - P.y);
+      if (d < bd) { bd = d; best = z; }
+    }
+    if (best && bd < (P.y - L.topPad) * 0.92) this.type(best.word[0]);
+  }
+
   setPaused(p: boolean) {
+    if (this.demo) return;
     if (!this.running || this.over || this.paused === p) return;
     if (p && this.phase === 'intro') return;
     this.paused = p;
-    this.onEvent({ type: 'pause', paused: p });
+    this.emit({ type: 'pause', paused: p });
   }
 
   /** Camera + screen fx decay on real time (so hitstop still "hits"), and keeps decaying after game over so menus never jitter. */
@@ -402,11 +451,12 @@ export class Game {
       this.stepVisual(realDt * 0.25);
       if (this.overT > 1.4 && this.running) {
         this.running = false;
-        this.onEvent({ type: 'gameover', stats: this.stats() });
+        this.emit({ type: 'gameover', stats: this.stats() });
       }
       return;
     }
 
+    if (this.demo) this.autopilot(realDt);
     if (this.phase === 'play') this.activeTime += realDt;
     let scale = 1;
     if (this.hitstop > 0) { this.hitstop -= realDt; scale = 0.06; }
@@ -427,7 +477,7 @@ export class Game {
     if (this.phase === 'exit') this.updateExit(realDt);
 
     const intensity = this.boss.active || this.grab ? 3 : this.tier >= 3 ? 3 : this.tier >= 1 ? 2 : 1;
-    if (audio.intensity !== intensity || audio.boss !== this.boss.active) audio.setIntensity(intensity, this.boss.active);
+    if (!this.demo && (audio.intensity !== intensity || audio.boss !== this.boss.active)) audio.setIntensity(intensity, this.boss.active);
   }
 
   private updateExit(dt: number) {
@@ -449,7 +499,7 @@ export class Game {
       };
       this.level++;
       this.prepareLevel();
-      this.onEvent({ type: 'intro', info: this.info, summary });
+      this.emit({ type: 'intro', info: this.info, summary });
     }
   }
   private lastBonus = 0;
@@ -469,8 +519,8 @@ export class Game {
 
     // spawning
     const n = this.level;
-    const spawnRate = Math.max(cfg.spawnRate - (n - 1) * 90, 650) / 1000;
-    const maxZ = cfg.maxZombies + Math.min(6, Math.floor((n - 1) / 2)) - (L.compact ? 1 : 0);
+    const spawnRate = this.demo ? 0.55 : Math.max(cfg.spawnRate - (n - 1) * 90, 650) / 1000;
+    const maxZ = this.demo ? (L.compact ? 7 : 12) : cfg.maxZombies + Math.min(6, Math.floor((n - 1) / 2)) - (L.compact ? 1 : 0);
     const alive = this.zombies.filter(z => !z.doomed).length;
     if (this.bossPendingAt >= 0 && this.time >= this.bossPendingAt) { this.bossPendingAt = -1; this.spawnBoss(); }
     if (this.phase === 'play' && !this.grab && !this.boss.active && this.bossPendingAt < 0 && this.time >= this.chapterUntil
@@ -646,6 +696,9 @@ export class Game {
         }
         default: break;
       }
+      // baggage carousel: anyone standing on the belt gets carried along it, then walks off
+      const ride = this.beltCarry(z);
+      if (ride) { vx = vx * 0.45 + ride.x; vy = vy * 0.45 + ride.y; }
       z.x += vx * zdt; z.y += vy * zdt;
       if (Math.abs(vx) > 1) z.facing = vx < 0 ? -1 : 1;
       if (d < this.contactDist(z)) this.contact(z);
@@ -667,6 +720,23 @@ export class Game {
         }
       }
     }
+  }
+
+  /** Belt velocity under a zombie's feet, or null when it isn't on a carousel belt. */
+  private beltCarry(z: Zombie): { x: number; y: number } | null {
+    const S = this.scene;
+    if (!S || !S.carousels.length || z.flying) return null;
+    for (const k of S.carousels) {
+      const dx = z.x - k.cx, dy = z.y - k.cy;
+      const outer = (dx / k.rx) ** 2 + (dy / k.ry) ** 2;
+      if (outer > 1) continue;
+      const irx = Math.max(1, k.rx - k.band), iry = Math.max(1, k.ry - k.band);
+      if ((dx / irx) ** 2 + (dy / iry) ** 2 < 1) continue;
+      const a = Math.atan2(dy / k.ry, dx / k.rx);
+      const w = Math.PI * 2 * k.speed;
+      return { x: -Math.sin(a) * (k.rx - k.band / 2) * w, y: Math.cos(a) * (k.ry - k.band / 2) * w };
+    }
+    return null;
   }
 
   private updateShooter(z: Zombie, dt: number, ux: number, uy: number) {
@@ -1180,6 +1250,11 @@ export class Game {
 
   // ---------------- contact: rams, grabs and bites ----------------
   private contact(z: Zombie) {
+    if (this.demo) {
+      z.doomed = true; z.deathAt = this.time; z.deathWeapon = 'pistol';
+      if (this.lockId === z.id) { this.lockId = null; this.typed = ''; }
+      return;
+    }
     if (z.attack === 'ram') { this.ram(z); return; }
     if (this.grab || this.boss.active) {
       // someone is already on you: wait your turn at arm's length
@@ -1379,7 +1454,7 @@ export class Game {
   }
 
   private loseLife(x: number, y: number, dmg = 1, force = false) {
-    if (this.over) return;
+    if (this.over || this.demo) return;
     if (!force && this.time - this.lifeLostAt < 0.9) return; // brief invulnerability after a hit
     this.lives = Math.max(0, this.lives - dmg);
     this.lifeLostAt = this.time;
@@ -1503,7 +1578,7 @@ export class Game {
     this.boss = {
       ...this.emptyBoss(),
       active: true, stage: 'entering', name: this.info.def.boss, x: this.layout.w / 2, y: -170 * scale, baseY: this.bossTargetY(), scale,
-      parts, sentence: pick(BOSS_SENTENCES[this.difficulty]), grabCd: 4,
+      parts, sentence: finisherFor(this.info.def.boss, this.difficulty), grabCd: 4,
     };
     this.lasers = [];
     audio.bossEnter();
