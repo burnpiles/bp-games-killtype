@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, bigint } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -22,11 +22,13 @@ export const leaderboardDifficultySchema = z.enum(leaderboardDifficultyValues);
 export const leaderboardScores = pgTable("leaderboard_scores", {
   id: serial("id").primaryKey(),
   username: text("username").notNull(),
-  score: integer("score").notNull(),
+  // bigint: combo multipliers push long runs past the int4 ceiling (2,147,483,647)
+  score: bigint("score", { mode: "number" }).notNull(),
   difficulty: text("difficulty").notNull(),
   wpm: integer("wpm").notNull(),
   accuracyPct: integer("accuracy_pct").notNull(),
-  createdAt: integer("created_at").notNull(),
+  // epoch milliseconds (Date.now()) — does not fit in int4
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
 });
 
 export const insertLeaderboardScoreSchema = createInsertSchema(leaderboardScores)
@@ -38,12 +40,20 @@ export const insertLeaderboardScoreSchema = createInsertSchema(leaderboardScores
     accuracyPct: true,
   })
   .extend({
-    username: z.string().trim().min(1).max(12),
-    score: z.number().int().nonnegative(),
+    username: z.string().trim().min(1).max(12).regex(/^[\w .\-]+$/, "Letters, numbers, spaces, . _ - only"),
+    score: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
     difficulty: leaderboardDifficultySchema,
-    wpm: z.number().int().nonnegative(),
+    wpm: z.number().int().nonnegative().max(300),
     accuracyPct: z.number().int().min(0).max(100),
   });
+
+export const leaderboardSubmissionSchema = insertLeaderboardScoreSchema.extend({
+  runToken: z.string().min(10).max(500),
+  kills: z.number().int().nonnegative().max(100000),
+  level: z.number().int().min(1).max(1000),
+});
+
+export const runStartSchema = z.object({ difficulty: leaderboardDifficultySchema });
 
 export const leaderboardQualificationSchema = z.object({
   score: z.number().int().nonnegative(),

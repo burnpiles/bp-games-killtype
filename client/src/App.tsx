@@ -1,9 +1,8 @@
 import React from "react";
-import { ZombieTypingGame } from "./components/ZombieTypingGame";
-import "@fontsource/inter";
+import { KillType } from "./game/KillType";
 
 function App() {
-  return <ZombieTypingGame />;
+  return <KillType />;
 }
 
 export default App;

@@ -79,10 +79,7 @@ canvas {
   text-shadow: 0 0 10px currentColor;
 }
 
-/* Crosshair Cursor */
-body {
-  cursor: crosshair !important;
-}
+
 
 /* Screen Flash Effects */
 @keyframes screen-flash-red {
