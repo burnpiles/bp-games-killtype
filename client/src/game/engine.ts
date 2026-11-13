@@ -122,6 +122,7 @@ export interface RunStats {
 
 export interface LevelSummary {
   level: number; name: string; worldName: string; kills: number; score: number; bonus: number; accuracyPct: number; escapes: number;
+  boss: string; globalLevel: number; totalScore: number;
 }
 
 export type GameEvent =
@@ -441,6 +442,7 @@ export class Game {
     if (this.exitT > 2.6) {
       const summary: LevelSummary = {
         level: this.info.levelInWorld, name: this.info.def.name, worldName: this.info.world.name,
+        boss: this.info.def.boss, globalLevel: this.info.index, totalScore: this.score,
         kills: this.kills - this.levelStart.kills, score: this.score - this.levelStart.score,
         bonus: this.lastBonus, escapes: this.escapes - this.levelStart.escapes,
         accuracyPct: (() => { const c = this.correct - this.levelStart.correct, m = this.mistakes - this.levelStart.mistakes; return c + m > 0 ? Math.round(c / (c + m) * 100) : 100; })(),

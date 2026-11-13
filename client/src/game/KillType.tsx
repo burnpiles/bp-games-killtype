@@ -5,6 +5,7 @@ import '@fontsource/chakra-petch/700.css';
 import '@fontsource/jetbrains-mono/700.css';
 import './game.css';
 import { audio } from './audio';
+import { track } from './analytics';
 import { DIFFICULTIES, DIFFICULTY_CONFIG, WEAPONS, type Difficulty } from './config';
 import { Game, type LevelSummary, type RunStats } from './engine';
 import { spriteThumb } from './sprites';
@@ -65,7 +66,6 @@ export function KillType() {
 
   const [screen, setScreen] = useState<Screen>('home');
   const [paused, setPaused] = useState(false);
-  const [needsTap, setNeedsTap] = useState(false);
   const [touch, setTouch] = useState(isTouchDevice);
   const [difficulty, setDifficulty] = useState<Difficulty>('hard');
   const [world, setWorld] = useState<WorldId>(() => { try { return (localStorage.getItem('killtype.world') as WorldId) || 'mall'; } catch { return 'mall'; } });
@@ -177,15 +177,20 @@ export function KillType() {
       if (e.type === 'pause') setPaused(e.paused);
       if (e.type === 'intro') {
         setIntro({ info: e.info, summary: e.summary });
-        setNeedsTap(false);
+        if (e.summary) {
+          const sm = e.summary;
+          track('boss_kill', { boss: sm.boss, world: sm.worldName, level: sm.level });
+          track('level_complete', { world: sm.worldName, level: sm.level, level_name: sm.name, global_level: sm.globalLevel, level_score: sm.score, score: sm.totalScore, accuracy: sm.accuracyPct, difficulty: gameRef.current.difficulty });
+        }
         if (e.summary) audio.setIntensity(0, false);
       }
       if (e.type === 'gameover') {
         setStats(e.stats);
+        const st = e.stats;
+        track('game_over', { score: st.score, level: st.level, world: st.world, level_name: st.levelName, difficulty: st.difficulty, wpm: st.wpm, accuracy: st.accuracyPct, kills: st.kills, max_combo: st.maxCombo, duration_s: Math.round(st.durationMs / 1000) });
         audio.setIntensity(0, false);
         setScreen('over');
         setPaused(false);
-        setNeedsTap(false);
         setIntro(null);
         inputRef.current?.blur();
       }
@@ -238,9 +243,9 @@ export function KillType() {
     setDifficulty(d);
     setWorld(w);
     try { localStorage.setItem('killtype.world', w); } catch { /* ignore */ }
+    track('game_start', { difficulty: d, world: w, device: isTouchDevice() ? 'touch' : 'keyboard' });
     setStats(null);
     setPaused(false);
-    setNeedsTap(false);
     setScreen('playing');
     gameRef.current.start(d, w);
     runTokenRef.current = startRun(d);
@@ -265,7 +270,6 @@ export function KillType() {
   const resume = useCallback(() => {
     audio.unlock();
     gameRef.current.setPaused(false);
-    setNeedsTap(false);
     focusTyping();
   }, [focusTyping]);
 
@@ -273,7 +277,6 @@ export function KillType() {
     audio.uiClick();
     gameRef.current.stop();
     setPaused(false);
-    setNeedsTap(false);
     setScreen('home');
     inputRef.current?.blur();
     audio.setIntensity(0, false);
@@ -379,12 +382,11 @@ export function KillType() {
       clearTimeout(kb.timer);
       setTimeout(() => relayoutRef.current(), 30);
     }
-    // On touch devices a closed keyboard means the player can't type: pause and ask for a tap.
+    // On touch devices a closed keyboard means the player can't type, so pause (the normal pause menu).
     if (!touchRef.current) return;
     setTimeout(() => {
       if (screenRef.current === 'playing' && !introRef.current && document.activeElement !== inputRef.current && !gameRef.current.over) {
         gameRef.current.setPaused(true);
-        setNeedsTap(true);
       }
     }, 80);
   };
@@ -496,18 +498,7 @@ export function KillType() {
           </div>
         )}
 
-        {screen === 'playing' && paused && needsTap && (
-          <div className="kt-overlay kt-tap" onPointerDown={(e) => { e.stopPropagation(); }} onClick={resume}>
-            <div className="kt-tap-inner">
-              <div className="kt-kicker">KEYBOARD CLOSED</div>
-              <div className="kt-tap-title">TAP TO KEEP TYPING</div>
-              <div className="kt-tap-sub">The game paused so nothing sneaks up on you.</div>
-              <button className="kt-text-btn" onClick={(e) => { e.stopPropagation(); setNeedsTap(false); }}>Open pause menu</button>
-            </div>
-          </div>
-        )}
-
-        {screen === 'playing' && paused && !needsTap && (
+        {screen === 'playing' && paused && (
           <div className="kt-overlay" onPointerDown={(e) => e.stopPropagation()}>
             <div className="kt-panel kt-pause">
               <div className="kt-kicker">PAUSED</div>
