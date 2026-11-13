@@ -40,6 +40,9 @@ export class AudioEngine {
   private musicBus!: GainNode;
   private reverbSend!: GainNode;
   private noiseBuf!: AudioBuffer;
+  /** Silences game sound effects (the attract-mode demo behind the menus). UI and music still play. */
+  quiet = false;
+  private uiSound = false;
   private prefs: AudioPrefs = loadPrefs();
   private listeners = new Set<() => void>();
 
@@ -140,6 +143,7 @@ export class AudioEngine {
     type?: OscillatorType; gain?: number; endFreq?: number; attack?: number; when?: number;
     bus?: AudioNode; reverb?: number; filter?: number; detune?: number;
   } = {}) {
+    if (this.quiet && !this.uiSound && !opts.bus) return;
     const ctx = this.ctx!;
     const t = (opts.when ?? ctx.currentTime);
     const o = ctx.createOscillator();
@@ -174,6 +178,7 @@ export class AudioEngine {
     type?: BiquadFilterType; freq?: number; endFreq?: number; q?: number; gain?: number;
     attack?: number; when?: number; bus?: AudioNode; reverb?: number;
   } = {}) {
+    if (this.quiet && !this.uiSound && !opts.bus) return;
     const ctx = this.ctx!;
     const t = opts.when ?? ctx.currentTime;
     const src = ctx.createBufferSource();
@@ -421,13 +426,17 @@ export class AudioEngine {
 
   uiHover() {
     if (!this.ok) return;
+    this.uiSound = true;
     this.tone(1600, 0.04, { type: 'sine', gain: 0.025 });
+    this.uiSound = false;
   }
 
   uiClick() {
     if (!this.ok) return;
+    this.uiSound = true;
     this.tone(700, 0.08, { type: 'triangle', gain: 0.08, endFreq: 1400 });
     this.noise(0.03, { type: 'highpass', freq: 4000, gain: 0.04 });
+    this.uiSound = false;
   }
 
   // ---------- music ----------

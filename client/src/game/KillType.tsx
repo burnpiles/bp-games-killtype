@@ -273,6 +273,13 @@ export function KillType() {
     focusTyping();
   }, [focusTyping]);
 
+  // attract mode: the game plays itself behind the menus
+  useEffect(() => {
+    const menu = screen === 'home' || screen === 'leaderboard' || screen === 'world' || screen === 'faq';
+    const g = gameRef.current;
+    if (menu && (g.demo || !g.running)) { if (!g.demo) g.startDemo(); }
+  }, [screen]);
+
   const quit = useCallback(() => {
     audio.uiClick();
     gameRef.current.stop();
@@ -545,7 +552,14 @@ export function KillType() {
             <div className="kt-home">
               <header className="kt-title-block">
                 <div className="kt-kicker">BURNPILES ARCADE · TYPING SURVIVAL</div>
-                <h1 className="kt-title" data-text="KILL TYPE">KILL TYPE</h1>
+                <h1 className="kt-title" aria-label="KILL TYPE">
+                  <svg className="kt-reticle" viewBox="0 0 200 200" aria-hidden="true">
+                    <circle cx="100" cy="100" r="78" /><circle cx="100" cy="100" r="54" className="kt-ret-in" />
+                    <path d="M100 4v40M100 156v40M4 100h40M156 100h40" />
+                  </svg>
+                  <span className="kt-t-kill" aria-hidden="true">{'KILL'.split('').map((c, i) => <i key={i} style={{ ['--i' as any]: i }}>{c}</i>)}</span>
+                  <span className="kt-t-type" aria-hidden="true">{'TYPE'.split('').map((c, i) => <i key={i} style={{ ['--i' as any]: i }}>{c}</i>)}<b className="kt-caret" /></span>
+                </h1>
                 <p className="kt-tagline">Every word is a bullet. Type fast or get eaten.</p>
               </header>
 
@@ -663,9 +677,9 @@ export function KillType() {
               <div className="kt-qual">
                 {submitted ? (
                   <div className="kt-qual-ok">RECORDED AT #{submitted.rank} ON {stats.difficulty.toUpperCase()}</div>
-                ) : qual?.qualifies ? (
+                ) : qual?.qualifies || (qualState === 'error' && stats.score > 0) ? (
                   <form className="kt-claim" onSubmit={(e) => { e.preventDefault(); submitScore(); }}>
-                    <div className="kt-qual-title">NEW HIGH SCORE · RANK #{qual.rank ?? qual.limit}</div>
+                    <div className="kt-qual-title">{qual ? `NEW HIGH SCORE · RANK #${qual.rank ?? qual.limit}` : 'CLAIM YOUR SCORE'}</div>
                     <div className="kt-claim-row">
                       <input value={name} maxLength={12} placeholder="YOUR NAME" autoCapitalize="characters" autoComplete="nickname"
                         onChange={(e) => setName(e.target.value.replace(/[^\w .\-]/g, '').slice(0, 12))} />

@@ -41,7 +41,7 @@ export async function startRun(difficulty: Difficulty): Promise<string | null> {
 }
 
 export async function qualify(body: { score: number; difficulty: Difficulty; wpm: number; accuracyPct: number }): Promise<Qualification> {
-  return json<Qualification>(await fetch('/api/leaderboard/qualify', {
+  return json<Qualification>(await fetch('/api/qualify', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   }));
 }
