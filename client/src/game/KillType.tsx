@@ -84,6 +84,8 @@ export function KillType() {
       const w = Math.round(vv?.width ?? window.innerWidth);
       const h = Math.round(vv?.height ?? window.innerHeight);
       const top = Math.round(vv?.offsetTop ?? 0);
+      // device-mode toggles and hidden iframes briefly report a 0px viewport
+      if (w < 2 || h < 2) return;
       const stage = stageRef.current;
       if (stage) {
         stage.style.width = `${w}px`;
@@ -125,11 +127,12 @@ export function KillType() {
     let raf = 0;
     let last = performance.now();
     const frame = (now: number) => {
+      raf = requestAnimationFrame(frame);
       const dt = Math.min(0.1, (now - last) / 1000);
       last = now;
-      gameRef.current.update(dt);
-      rendererRef.current?.draw(dt);
-      raf = requestAnimationFrame(frame);
+      // a single bad frame must never stop the loop (that is a black screen)
+      try { gameRef.current.update(dt); } catch (e) { console.error(e); }
+      try { rendererRef.current?.draw(dt); } catch (e) { console.error(e); }
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);

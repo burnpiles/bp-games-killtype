@@ -376,7 +376,7 @@ const PAINT: Record<Ground, (c: Ctx) => void> = {
 export function paintGround(ground: Ground, w: number, h: number, dpr: number, compact: boolean, player: { x: number; y: number }, key: string): HTMLCanvasElement {
   const cnv = document.createElement('canvas');
   const s = Math.min(dpr, 2);
-  cnv.width = Math.round(w * s); cnv.height = Math.round(h * s);
+  cnv.width = Math.max(1, Math.round(w * s)); cnv.height = Math.max(1, Math.round(h * s));
   const g = cnv.getContext('2d')!;
   g.scale(s, s);
   const c: Ctx = { g, w, h, compact, px: player.x, py: player.y, rnd: seeded(hash(key)) };

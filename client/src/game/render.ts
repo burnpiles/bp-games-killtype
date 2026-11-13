@@ -35,9 +35,12 @@ export class Renderer {
     this.ctx = canvas.getContext('2d', { alpha: false })!;
   }
 
+  private bossLayer: HTMLCanvasElement | null = null;
+
   fontsChanged() { this.charW.clear(); }
 
   resize(w: number, h: number, dpr: number) {
+    w = Math.max(1, w); h = Math.max(1, h);
     const resized = w !== this.w || h !== this.h || dpr !== this.dpr;
     this.w = w; this.h = h; this.dpr = dpr;
     this.canvas.width = Math.round(w * dpr);
@@ -56,7 +59,7 @@ export class Renderer {
       this.decal.width = Math.round(w * this.decalScale);
       this.decal.height = Math.round(h * this.decalScale);
       this.decalCtx = this.decal.getContext('2d')!;
-      if (old) this.decalCtx.drawImage(old, 0, 0, this.decal.width, this.decal.height);
+      if (old && old.width > 0 && old.height > 0) this.decalCtx.drawImage(old, 0, 0, this.decal.width, this.decal.height);
     }
     const sc = document.createElement('canvas');
     sc.width = 1; sc.height = 3;
@@ -857,7 +860,7 @@ export class Renderer {
 
   // ---------------- boss ----------------
   private drawBoss(b: Boss) {
-    const c = this.ctx;
+    let c = this.ctx;
     const G = this.game;
     const S = b.scale;
     const x = b.x, y = b.y;
@@ -869,9 +872,27 @@ export class Renderer {
     c.globalAlpha = 0.6;
     c.drawImage(this.atlas.glow.shadow, x - 150 * S, y + 100 * S, 300 * S, 70 * S);
     c.globalAlpha = 1;
+    // The hit/death white-out needs a transparent layer: 'source-atop' on the
+    // opaque main canvas would paint a solid square instead of the silhouette.
+    const main = c;
+    const useLayer = flash > 0.02;
+    const BR = 220;
+    const q = Math.min(2, this.dpr) * S;
+    if (useLayer) {
+      const size = Math.ceil(BR * 2 * q);
+      if (!this.bossLayer) this.bossLayer = document.createElement('canvas');
+      const L = this.bossLayer;
+      if (L.width !== size || L.height !== size) { L.width = size; L.height = size; }
+      const lc = L.getContext('2d')!;
+      lc.setTransform(1, 0, 0, 1, 0, 0);
+      lc.globalCompositeOperation = 'source-over';
+      lc.globalAlpha = 1;
+      lc.clearRect(0, 0, size, size);
+      lc.setTransform(q, 0, 0, q, BR * q, BR * q);
+      c = lc;
+    }
     c.save();
-    c.translate(x + shakeX, y);
-    c.scale(S, S);
+    if (!useLayer) { c.translate(x + shakeX, y); c.scale(S, S); }
     c.lineJoin = 'round';
 
     const limb = (x0: number, y0: number, x1: number, y1: number, wdt: number, destroyed: boolean) => {
@@ -958,13 +979,17 @@ export class Renderer {
       c.fillStyle = edge; c.fillRect(-30, -78, 60, 22);
       c.fillStyle = '#ff6a2a'; c.fillRect(-18, -76, 36, 6);
     }
-    if (flash > 0.02) {
+    if (useLayer) {
       c.globalCompositeOperation = 'source-atop';
       c.fillStyle = `rgba(255,255,255,${Math.min(0.8, flash)})`;
-      c.fillRect(-160, -160, 320, 320);
+      c.fillRect(-BR, -BR, BR * 2, BR * 2);
       c.globalCompositeOperation = 'source-over';
     }
     c.restore();
+    if (useLayer) {
+      c = main;
+      c.drawImage(this.bossLayer!, x + shakeX - BR * S, y - BR * S, BR * 2 * S, BR * 2 * S);
+    }
 
     // glows
     c.globalCompositeOperation = 'lighter';
