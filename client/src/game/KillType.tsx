@@ -33,6 +33,26 @@ function useMuted() {
   return useSyncExternalStore(cb => audio.subscribe(cb), () => audio.muted, () => false);
 }
 
+type KbGap = 'auto' | 'off' | 'small' | 'medium' | 'large';
+const KB_GAPS: { id: KbGap; label: string }[] = [
+  { id: 'auto', label: 'Auto' }, { id: 'off', label: 'Off' }, { id: 'small', label: 'S' }, { id: 'medium', label: 'M' }, { id: 'large', label: 'L' },
+];
+
+/** How much of the bottom of the viewport the on-screen keyboard covers, in CSS px. */
+function keyboardInset(mode: KbGap, kb: { open: boolean; overlay: boolean }, w: number, h: number): number {
+  if (!kb.open || mode === 'off') return 0;
+  if (mode !== 'auto') return Math.round(h * (mode === 'small' ? 0.3 : mode === 'medium' ? 0.4 : 0.5));
+  if (!kb.overlay) return 0; // the browser already shrank the viewport for us
+  const a = window.screen?.width || w, b = window.screen?.height || h;
+  const landscape = w > h;
+  const sw = Math.min(a, b);
+  const sh = landscape ? Math.min(a, b) : Math.max(a, b);
+  const tablet = sw >= 600;
+  const frac = tablet ? (landscape ? 0.42 : 0.31) : (landscape ? 0.55 : 0.39);
+  const est = Math.max(tablet ? 300 : 240, sh * frac);
+  return Math.round(Math.min(est, h * 0.62));
+}
+
 export function KillType() {
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -62,6 +82,13 @@ export function KillType() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const muted = useMuted();
+  const [kbGap, setKbGap] = useState<KbGap>(() => { try { return (localStorage.getItem('killtype.kbgap') as KbGap) || 'auto'; } catch { return 'auto'; } });
+  const kbGapRef = useRef(kbGap);
+  kbGapRef.current = kbGap;
+  /** Keyboard bookkeeping: tallest unobstructed viewport, whether the keyboard is up, and the auto-detected overlap. */
+  const kbRef = useRef({ baseH: 0, baseW: 0, open: false, overlay: false, timer: 0 as any });
+  const relayoutRef = useRef<() => void>(() => {});
+  useEffect(() => { relayoutRef.current(); }, [kbGap]);
 
   const screenRef = useRef(screen);
   screenRef.current = screen;
@@ -82,10 +109,14 @@ export function KillType() {
     const apply = () => {
       const vv = window.visualViewport;
       const w = Math.round(vv?.width ?? window.innerWidth);
-      const h = Math.round(vv?.height ?? window.innerHeight);
+      const fullH = Math.round(vv?.height ?? window.innerHeight);
       const top = Math.round(vv?.offsetTop ?? 0);
       // device-mode toggles and hidden iframes briefly report a 0px viewport
-      if (w < 2 || h < 2) return;
+      if (w < 2 || fullH < 2) return;
+      const kb = kbRef.current;
+      if (w !== kb.baseW) { kb.baseW = w; kb.baseH = fullH; }
+      if (!kb.open) kb.baseH = Math.max(kb.baseH, fullH);
+      const h = Math.max(160, fullH - keyboardInset(kbGapRef.current, kb, w, fullH));
       const stage = stageRef.current;
       if (stage) {
         stage.style.width = `${w}px`;
@@ -103,6 +134,7 @@ export function KillType() {
       renderer.resize(w, h, dpr);
     };
     apply();
+    relayoutRef.current = () => { lastKey = ''; apply(); };
     const onScroll = () => {
       // iOS scrolls the page to "reveal" a focused input; pin it back.
       if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0);
@@ -323,7 +355,30 @@ export function KillType() {
     if (ne.inputType === 'deleteContentBackward') gameRef.current.release();
   };
 
+  /** The keyboard is opening. Some hosts (in-app browsers, iframes) don't shrink the viewport for it,
+   *  so after it has animated in we check, and if nothing moved we reserve space for it ourselves. */
+  const handleFocus = () => {
+    if (!touchRef.current) return;
+    const kb = kbRef.current;
+    kb.open = true;
+    clearTimeout(kb.timer);
+    const check = (tries: number) => {
+      const vh = window.visualViewport?.height ?? window.innerHeight;
+      kb.overlay = vh > kb.baseH * 0.85;
+      relayoutRef.current();
+      if (tries > 0) kb.timer = setTimeout(() => check(tries - 1), 350);
+    };
+    kb.timer = setTimeout(() => check(2), 420);
+    relayoutRef.current();
+  };
+
   const handleBlur = () => {
+    const kb = kbRef.current;
+    if (kb.open) {
+      kb.open = false; kb.overlay = false;
+      clearTimeout(kb.timer);
+      setTimeout(() => relayoutRef.current(), 30);
+    }
     // On touch devices a closed keyboard means the player can't type: pause and ask for a tap.
     if (!touchRef.current) return;
     setTimeout(() => {
@@ -428,6 +483,7 @@ export function KillType() {
             e.currentTarget.value = '';
             prevValueRef.current = '';
           }}
+          onFocus={handleFocus}
           onBlur={handleBlur}
         />
 
@@ -467,6 +523,17 @@ export function KillType() {
                 <MenuBtn label="Restart" hint={touch ? '' : 'R'} onClick={() => begin(game.difficulty, game.world)} />
                 <MenuBtn label="Main menu" hint={touch ? '' : 'M'} onClick={quit} />
               </div>
+              {touch && (
+                <div className="kt-kbgap">
+                  <div className="kt-kbgap-label">Keyboard space <span>keeps you above the keyboard</span></div>
+                  <div className="kt-seg" role="radiogroup" aria-label="Keyboard space">
+                    {KB_GAPS.map(g => (
+                      <button key={g.id} role="radio" aria-checked={kbGap === g.id} className={kbGap === g.id ? 'on' : ''}
+                        onClick={(e) => { e.stopPropagation(); audio.uiClick(); setKbGap(g.id); try { localStorage.setItem('killtype.kbgap', g.id); } catch { /* ignore */ } }}>{g.label}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="kt-pause-foot">
                 <MuteButton />
                 {!touch && <span>ESC to resume · BACKSPACE drops a target</span>}

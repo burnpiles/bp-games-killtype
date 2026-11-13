@@ -4,6 +4,7 @@
 import { COMBO_TIERS, DIFFICULTY_CONFIG, MAX_LIVES, WEAPONS } from './config';
 import type { Boss, BossPart, Game, Zombie } from './engine';
 import { paintGround } from './ground';
+import { drawSceneLive } from './scenes';
 import { buildAtlas, rgba, type Atlas } from './sprites';
 
 const DISPLAY = '"Chakra Petch", "Rajdhani", system-ui, sans-serif';
@@ -75,7 +76,7 @@ export class Renderer {
     const G = this.game;
     this.groundKey = `${G.groundKey}|${this.w}x${this.h}`;
     const P = { x: G.layout.w / 2, y: G.layout.mode === 'lane' ? G.layout.h - G.layout.bottomPad - (G.layout.compact ? 6 : 20) : G.layout.h / 2 + 30 };
-    this.ground = paintGround(G.groundKey ? G.info.def.ground : 'concrete', this.w, this.h, this.dpr, G.layout.compact, P, G.groundKey || 'menu');
+    this.ground = paintGround(G.groundKey ? G.info.def.ground : 'concrete', this.w, this.h, this.dpr, G.layout.compact, P, G.groundKey || 'menu', G.groundKey ? G.scene : null);
   }
 
   private buildFog() {
@@ -103,7 +104,7 @@ export class Renderer {
     const g = c.getContext('2d')!;
     const gr = g.createRadialGradient(c.width / 2, c.height * 0.55, Math.min(c.width, c.height) * 0.25, c.width / 2, c.height / 2, Math.max(c.width, c.height) * 0.75);
     gr.addColorStop(0, 'rgba(0,0,0,0)');
-    gr.addColorStop(1, 'rgba(0,0,0,0.78)');
+    gr.addColorStop(1, 'rgba(0,0,0,0.6)');
     g.fillStyle = gr;
     g.fillRect(0, 0, c.width, c.height);
     this.vignette = c;
@@ -262,6 +263,7 @@ export class Renderer {
     c.fillRect(-60, -60, w + 120, h + 120);
     c.drawImage(this.ground, 0, 0, w, h);
     c.drawImage(this.decal, 0, 0, w, h);
+    if (G.scene && G.groundKey) drawSceneLive(c, G.scene, G.time, G.sceneBurst);
     const sat = Math.min(G.kills * 0.003, 0.09);
     if (sat > 0) { c.fillStyle = `rgba(90,0,0,${sat})`; c.fillRect(0, 0, w, h); }
 
@@ -435,6 +437,7 @@ export class Renderer {
     if (body === 'horse' && z.state === 'tell') { c.rotate(-0.35 * z.facing); c.translate(0, -6); }
     if (z.state === 'tell' && (body === 'car' || body === 'bumper')) c.translate(Math.sin(this.t * 60) * 1.2, 0);
     if (z.kind === 'gator' && z.state === 'charge') c.scale(1.05, 0.95);
+    if (z.emerge > 0) { const k = 1 - z.emerge / 0.6; c.translate(0, (1 - k) * set.h * 0.45); c.scale(0.6 + k * 0.4, k); }
     c.scale(z.facing * sq, 1 / sq);
     c.globalAlpha = spawnA;
     c.drawImage(set.frames[frame], -set.w / 2, -set.h / 2);

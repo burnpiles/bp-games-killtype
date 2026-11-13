@@ -7,6 +7,7 @@ import {
   type Behavior, type Difficulty, type SpecialWeaponId, type WeaponId,
 } from './config';
 import { audio } from './audio';
+import { layoutScene, carouselPoint, suitcaseU, type Scene, type SpawnPoint } from './scenes';
 import {
   ARMOR_WORDS, BREAK_WORDS, ENEMIES, SHORT_WORDS, levelInfo,
   type Attack, type EnemyKind, type LevelInfo, type SpriteKey, type WorldId,
@@ -52,6 +53,10 @@ export interface Zombie {
   charging: number;
   leash: number | null;
   latched: boolean;
+  /** Scripted way in: riding an escalator, walking out of a door. Cleared once it reaches the floor. */
+  entry: { pts: Array<{ x: number; y: number }>; i: number; speed: number; ride: boolean } | null;
+  /** Seconds left of popping out of a suitcase / counter / the water. */
+  emerge: number;
 }
 
 export interface Particle {
@@ -133,6 +138,9 @@ export class Game {
   exitT = 0;
   fade = 0;
   groundKey = '';
+  scene: Scene | null = null;
+  /** Suitcases that something has burst out of, keyed "carousel:slot" → time. */
+  sceneBurst = new Map<string, number>();
   running = false;
   paused = false;
   over = false;
@@ -226,19 +234,21 @@ export class Game {
   // ---------------- layout ----------------
   setLayout(w: number, h: number, compact: boolean) {
     const prev = this.layout;
-    const mode: Layout['mode'] = compact || w / h < 1.05 || h < 520 ? 'lane' : 'arena';
+    // Player holds the bottom edge on every screen; enemies pour in from the top semicircle.
+    const mode: Layout['mode'] = 'lane';
     const topPad = compact ? 54 : 80;
-    const bottomPad = mode === 'lane' ? (compact ? 64 : 90) : 70;
+    const bottomPad = compact ? 64 : 96;
     this.layout = { w, h, mode, compact, topPad, bottomPad };
     this.fxScale = compact ? 0.6 : 1;
     const walking = this.phase === 'exit';
     const oldY = this.player.y;
     this.placePlayer();
     if (walking) this.player.y = Math.min(this.player.y, oldY);
+    this.buildScene();
     if (prev.w > 0 && prev.h > 0 && (prev.w !== w || prev.h !== h)) {
       const sx = w / prev.w, sy = h / prev.h;
       const remap = (o: { x: number; y: number }) => { o.x *= sx; o.y *= sy; };
-      this.zombies.forEach(z => { remap(z); z.tagInit = false; });
+      this.zombies.forEach(z => { remap(z); z.tagInit = false; z.entry = null; });
       this.corpses.forEach(remap);
       this.particles.forEach(remap);
       this.lasers.forEach(remap);
@@ -250,6 +260,13 @@ export class Game {
         this.boss.parts.forEach(p => { p.tagInit = false; });
       }
     }
+  }
+
+  private buildScene() {
+    const L = this.layout;
+    if (!this.groundKey) { this.scene = null; return; }
+    const P = this.player;
+    this.scene = layoutScene(this.info.def.scene, L.w, L.h, L.compact, { x: P.x, y: L.h - L.bottomPad - (L.compact ? 6 : 20) }, L.topPad);
   }
 
   private placePlayer() {
@@ -308,6 +325,8 @@ export class Game {
     this.levelTarget = Math.round(base * (0.7 + 0.07 * (this.info.levelInWorld - 1)) * (1 + this.info.loop * 0.2));
     this.groundKey = `${this.info.world.id}:${this.info.levelInWorld}:${this.info.def.ground}`;
     this.placePlayer();
+    this.sceneBurst.clear();
+    this.buildScene();
     this.player.aim = -Math.PI / 2;
     this.levelStart = { score: this.score, kills: this.kills, correct: this.correct, mistakes: this.mistakes, escapes: this.escapes };
   }
@@ -533,6 +552,17 @@ export class Game {
         continue;
       }
       if (z.stun > 0) { z.stun -= zdt; continue; }
+      if (z.emerge > 0) { z.emerge -= zdt; continue; }
+      if (z.entry) {
+        const e = z.entry;
+        const tgt = e.pts[e.i];
+        const ex = tgt.x - z.x, ey = tgt.y - z.y, ed = Math.hypot(ex, ey);
+        const v = e.ride ? e.speed : Math.max(26, z.speed * ss);
+        const step = v * zdt;
+        if (ed <= step) { z.x = tgt.x; z.y = tgt.y; e.i++; if (e.i >= e.pts.length) { z.entry = null; z.stateT = 0; const d0 = Math.hypot(P.x - z.x, P.y - z.y) || 1; z.dirX = (P.x - z.x) / d0; z.dirY = (P.y - z.y) / d0; z.startD = d0; } }
+        else { z.x += ex / ed * step; z.y += ey / ed * step; }
+        continue;
+      }
       z.stateT += zdt;
 
       const dx = P.x - z.x, dy = P.y - z.y;
@@ -759,19 +789,68 @@ export class Game {
 
   private spawnPos(kind: EnemyKind): { x: number; y: number } {
     const L = this.layout;
+    const P = this.player;
+    // Pick a bearing on the upper semicircle around the player, then walk out along it to just past the play edge.
     const sideBias = kind === 'car' || kind === 'cart' || kind === 'horse';
-    if (L.mode === 'lane') {
-      const r = Math.random();
-      if (!sideBias && r < 0.7) return { x: 30 + Math.random() * (L.w - 60), y: L.topPad - 12 };
-      const left = Math.random() < 0.5;
-      return { x: left ? -24 : L.w + 24, y: L.topPad + Math.random() * (this.player.y - L.topPad) * (sideBias ? 0.35 : 0.45) };
+    const lo = L.compact ? 0.32 : 0.2; // radians above horizontal, so nothing spawns level with the player
+    let up: number; // 0 = straight right, PI = straight left
+    if (sideBias) {
+      const a = lo + Math.random() * 0.55;
+      up = Math.random() < 0.5 ? a : Math.PI - a;
+    } else up = lo + Math.random() * (Math.PI - lo * 2);
+    const dx = Math.cos(up), dy = -Math.sin(up);
+    const tx = dx > 1e-3 ? (L.w - P.x) / dx : dx < -1e-3 ? -P.x / dx : Infinity;
+    const ty = (L.topPad - P.y) / dy;
+    const t = Math.min(tx, ty) + 26;
+    return { x: P.x + dx * t, y: P.y + dy * t };
+  }
+
+  /** Maybe route this enemy through a set piece: down an escalator, out of a door or a suitcase. */
+  private sceneSpawn(kind: EnemyKind): (SpawnPoint & { x: number; y: number }) | null {
+    const S = this.scene;
+    if (!S || !S.spawns.length || Math.random() > 0.55) return null;
+    const def = ENEMIES[kind];
+    const ok = S.spawns.filter(p => {
+      if (kind === 'car' || kind === 'horse' && p.tag !== 'ride') return false;
+      if (p.tag === 'water') return kind === 'gator' || kind === 'walker' || kind === 'runner';
+      if (p.tag === 'ride') return kind === 'horse' || kind === 'robot' || kind === 'walker' || kind === 'twitcher';
+      if (p.tag === 'suitcase') return kind !== 'brute' && kind !== 'karen' && kind !== 'guard' && kind !== 'robot';
+      if (def.flying) return false;
+      if (p.tag === 'escalator' || p.tag === 'walkway') return kind !== 'gator' && kind !== 'cart';
+      return kind !== 'gator';
+    });
+    if (!ok.length) return null;
+    let r = Math.random() * ok.reduce((a, p) => a + p.weight, 0);
+    let pick = ok[0];
+    for (const p of ok) { r -= p.weight; if (r <= 0) { pick = p; break; } }
+    if (pick.tag === 'suitcase' && pick.carousel !== undefined) {
+      // choose a bag that's on the near half of the belt and hasn't already burst
+      const k = S.carousels[pick.carousel];
+      const slots = Array.from({ length: k.slots }, (_, i) => i).filter(i => !this.sceneBurst.has(`${pick.carousel}:${i}`) || this.time - this.sceneBurst.get(`${pick.carousel}:${i}`)! > 7);
+      if (!slots.length) return null;
+      const slot = slots[Math.floor(Math.random() * slots.length)];
+      const pt = carouselPoint(k, suitcaseU(k, slot, this.time));
+      this.sceneBurst.set(`${pick.carousel}:${slot}`, this.time);
+      return { ...pick, x: pt.x, y: pt.y };
     }
-    const m = 36;
-    const side = sideBias ? (Math.random() < 0.5 ? 1 : 3) : Math.floor(Math.random() * 4);
-    if (side === 0) return { x: Math.random() * L.w, y: -m };
-    if (side === 1) return { x: L.w + m, y: L.topPad + Math.random() * (L.h - L.topPad - L.bottomPad) };
-    if (side === 2) return { x: Math.random() * L.w, y: L.h + m };
-    return { x: -m, y: L.topPad + Math.random() * (L.h - L.topPad - L.bottomPad) };
+    return { ...pick };
+  }
+
+  private applyEntry(z: Zombie, via: SpawnPoint) {
+    if (via.type === 'emerge') {
+      z.emerge = 0.6;
+      const col = via.tag === 'suitcase' ? ['#7a2a8a', '#2a5a8a', '#8a2a2a', '#c8c8d0'][Math.floor(Math.random() * 4)] : via.tag === 'water' ? '#5ac8ff' : '#6a5a4a';
+      for (let i = 0; i < 14 * this.fxScale + 6; i++) {
+        const a = Math.random() * Math.PI * 2, sp = 60 + Math.random() * 160;
+        this.particles.push({ x: z.x, y: z.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 40, life: 0.5 + Math.random() * 0.4, max: 0.9, size: 3 + Math.random() * 4, color: via.tag === 'water' ? '#5ac8ff' : Math.random() < 0.6 ? col : '#e8e0d0', kind: via.tag === 'water' ? 'spark' : 'debris', drag: 0.05, grav: 200, rot: Math.random() * 6, vr: (Math.random() - 0.5) * 18 });
+      }
+      if (via.tag === 'suitcase') audio.crash();
+      return;
+    }
+    if (via.path && via.path.length > 1) {
+      z.entry = { pts: via.path.map(p => ({ ...p })), i: 1, speed: via.speed ?? 0, ride: !!via.speed };
+      z.facing = 1;
+    }
   }
 
   private spawnZombie(kindArg?: EnemyKind, at?: { x: number; y: number }, leash: number | null = null): Zombie {
@@ -779,7 +858,8 @@ export class Game {
     const kind = kindArg ?? this.pickKind();
     const def = ENEMIES[kind];
     const skin = this.info.world.skins[kind];
-    const pos = at ?? this.spawnPos(kind);
+    const via = at ? null : this.sceneSpawn(kind);
+    const pos = at ?? (via ? { x: via.x, y: via.y } : this.spawnPos(kind));
     const n = Math.min(this.level - 1, 14);
     let speed = (15 + n * 2.6 + prof.speedBonus + (Math.random() * 6 - 3)) * def.speed * (1 + this.info.loop * 0.15);
     const behavior: Behavior = kind === 'runner' ? 'sprinter' : kind === 'twitcher' ? 'zigzag' : 'normal';
@@ -802,7 +882,9 @@ export class Game {
       doomed: false, deathAt: 0, deathWeapon: 'pistol', tagX: 0, tagY: 0, tagInit: false, facing: P.x > pos.x ? 1 : -1,
       stun: 0, state: kind === 'car' ? 'tell' : 'move', stateT: 0, dirX: 0, dirY: 0,
       startD: Math.hypot(P.x - pos.x, P.y - pos.y), fireT: 0, charging: 0, leash, latched: false,
+      entry: null, emerge: 0,
     };
+    if (via) this.applyEntry(z, via);
     const d = z.startD || 1;
     z.dirX = (P.x - pos.x) / d; z.dirY = (P.y - pos.y) / d;
     this.zombies.push(z);
@@ -1326,7 +1408,7 @@ export class Game {
   private bossScale() {
     const L = this.layout;
     if (L.compact) return Math.max(0.5, Math.min(0.7, L.w / 600));
-    return L.mode === 'lane' ? 0.8 : Math.max(1, Math.min(1.4, L.h / 680));
+    return L.compact ? 0.8 : Math.max(0.9, Math.min(1.3, L.h / 760));
   }
   private bossTargetY() {
     const L = this.layout;

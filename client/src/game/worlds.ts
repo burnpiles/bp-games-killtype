@@ -1,6 +1,8 @@
 // Campaign content: enemy archetypes, the three worlds, and their ten levels each.
 // Engine behaviour is keyed off EnemyKind; worlds only re-skin and re-name them.
 
+import type { SceneId } from './scenes';
+
 export type EnemyKind =
   | 'walker' | 'runner' | 'twitcher' | 'dog' | 'bird' | 'gator' | 'horse'
   | 'robot' | 'sprayer' | 'brute' | 'guard' | 'karen' | 'cart' | 'car';
@@ -39,7 +41,7 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
 
 /** Sprite keys the atlas knows how to draw. */
 export type SpriteKey =
-  | 'walker' | 'runner' | 'twitcher' | 'carrier' | 'guard' | 'karen' | 'sprayer' | 'tsa' | 'clown' | 'pilot' | 'shopper' | 'guest'
+  | 'walker' | 'runner' | 'twitcher' | 'carrier' | 'rusher' | 'mallrat' | 'guard' | 'karen' | 'sprayer' | 'tsa' | 'clown' | 'pilot' | 'shopper' | 'guest'
   | 'dog' | 'poodle' | 'k9' | 'bird' | 'pigeon' | 'seagull' | 'gator' | 'horse' | 'carousel'
   | 'robot' | 'drone' | 'animatronic' | 'brute' | 'mascot' | 'handler' | 'santa'
   | 'cart' | 'luggage' | 'bumper' | 'car' | 'tug';
@@ -51,6 +53,7 @@ export interface Skin { name: string; sprite: SpriteKey }
 
 export interface LevelDef {
   name: string;
+  scene: SceneId;
   ground: Ground;
   story: string;
   roster: Partial<Record<EnemyKind, number>>;
@@ -92,8 +95,8 @@ export const WORLDS: Record<WorldId, WorldDef> = {
     color: '#ff4dd2',
     skins: base({
       walker: { name: 'Shopper', sprite: 'shopper' },
-      runner: { name: 'Sale Rusher', sprite: 'runner' },
-      twitcher: { name: 'Mall Rat', sprite: 'twitcher' },
+      runner: { name: 'Sale Rusher', sprite: 'rusher' },
+      twitcher: { name: 'Mall Rat', sprite: 'mallrat' },
       dog: { name: 'Zombie Poodle', sprite: 'poodle' },
       sprayer: { name: 'Fragrance Sprayer', sprite: 'sprayer' },
       guard: { name: 'Security Guard', sprite: 'guard' },
@@ -103,25 +106,25 @@ export const WORLDS: Record<WorldId, WorldDef> = {
       bird: { name: 'Food Court Pigeon', sprite: 'pigeon' },
     }),
     levels: [
-      { name: 'Grand Atrium', ground: 'atrium', boss: 'THE GREETER', roster: { walker: 6, runner: 2 },
+      { name: 'Grand Atrium', scene: 'atrium', ground: 'atrium', boss: 'THE GREETER', roster: { walker: 6, runner: 2 },
         story: 'The doors opened at 6 AM and the shoppers never left. The only way out is through the atrium.' },
-      { name: 'Food Court', ground: 'foodcourt', boss: 'THE FRYCOOK', roster: { walker: 5, runner: 3, twitcher: 2, bird: 2 },
+      { name: 'Food Court', scene: 'foodcourt', ground: 'foodcourt', boss: 'THE FRYCOOK', roster: { walker: 5, runner: 3, twitcher: 2, bird: 2 },
         story: 'Something was in the pretzel batter. The lunch rush is hungry, and you are the special of the day.' },
-      { name: 'Parking Lot', ground: 'parking', boss: 'THE VALET', roster: { walker: 3, karen: 3, dog: 2, cart: 3, car: 1 },
+      { name: 'Parking Lot', scene: 'parkinglot', ground: 'parking', boss: 'THE VALET', roster: { walker: 3, karen: 3, dog: 2, cart: 3, car: 1 },
         story: 'Across the lot to the exit ramp. Every Karen who ever asked for a manager is out here, and she brought her poodle.' },
-      { name: 'Department Store', ground: 'store', boss: 'THE FLOOR MANAGER', roster: { walker: 4, runner: 2, sprayer: 3, guard: 2 },
+      { name: 'Department Store', scene: 'deptstore', ground: 'store', boss: 'THE FLOOR MANAGER', roster: { walker: 4, runner: 2, sprayer: 3, guard: 2 },
         story: 'The ramp was blocked, so back inside. Perfume counters ahead. Do not breathe the free samples.' },
-      { name: 'Electronics', ground: 'atrium', boss: 'THE DEMO UNIT', roster: { walker: 3, twitcher: 3, robot: 3, guard: 1 },
+      { name: 'Electronics', scene: 'electronics', ground: 'atrium', boss: 'THE DEMO UNIT', roster: { walker: 3, twitcher: 3, robot: 3, guard: 1 },
         story: 'The display robots woke up with the lights. They do not need to get close to hurt you.' },
-      { name: 'Toy Kingdom', ground: 'foodcourt', boss: 'THE BIG BEAR', roster: { runner: 4, twitcher: 3, dog: 2, robot: 2, cart: 2 },
+      { name: 'Toy Kingdom', scene: 'toys', ground: 'foodcourt', boss: 'THE BIG BEAR', roster: { runner: 4, twitcher: 3, dog: 2, robot: 2, cart: 2 },
         story: 'Wind-up toys, battery dogs and a lot of very small zombies with very loud lungs.' },
-      { name: 'Loading Dock', ground: 'concrete', boss: 'THE FORKLIFT', roster: { walker: 3, runner: 3, brute: 1, cart: 3, guard: 2 },
+      { name: 'Loading Dock', scene: 'dock', ground: 'concrete', boss: 'THE FORKLIFT', roster: { walker: 3, runner: 3, brute: 1, cart: 3, guard: 2 },
         story: 'The staff exit. The stock team was big before they turned. They are bigger now.' },
-      { name: 'Cinema', ground: 'carpet', boss: 'THE USHER', roster: { walker: 3, twitcher: 4, sprayer: 2, robot: 2, karen: 2, dog: 1 },
+      { name: 'Cinema', scene: 'cinema', ground: 'carpet', boss: 'THE USHER', roster: { walker: 3, twitcher: 4, sprayer: 2, robot: 2, karen: 2, dog: 1 },
         story: 'The midnight premiere sold out. Nobody came out of screen 6.' },
-      { name: 'Rooftop Garage', ground: 'parking', boss: 'THE TOW TRUCK', roster: { runner: 3, car: 3, cart: 3, karen: 2, dog: 2, brute: 1 },
+      { name: 'Rooftop Garage', scene: 'garage', ground: 'parking', boss: 'THE TOW TRUCK', roster: { runner: 3, car: 3, cart: 3, karen: 2, dog: 2, brute: 1 },
         story: 'Level P4. Engines are running and nobody is behind the wheel.' },
-      { name: 'Management Office', ground: 'store', boss: 'THE REGIONAL MANAGER', roster: { runner: 3, twitcher: 3, guard: 3, robot: 2, sprayer: 2, brute: 1, karen: 2, dog: 2 },
+      { name: 'Management Office', scene: 'office', ground: 'store', boss: 'THE REGIONAL MANAGER', roster: { runner: 3, twitcher: 3, guard: 3, robot: 2, sprayer: 2, brute: 1, karen: 2, dog: 2 },
         story: 'She asked to speak to the manager. This is the manager. Finish it and the mall is clear.' },
     ],
   },
@@ -145,25 +148,25 @@ export const WORLDS: Record<WorldId, WorldDef> = {
       car: { name: 'Baggage Tug', sprite: 'tug' },
     }),
     levels: [
-      { name: 'Curbside Drop-off', ground: 'tarmac', boss: 'THE SHUTTLE', roster: { walker: 6, runner: 2, cart: 1 },
+      { name: 'Curbside Drop-off', scene: 'curbside', ground: 'concrete', boss: 'THE SHUTTLE', roster: { walker: 6, runner: 2, cart: 1 },
         story: 'Departures level. The taxis stopped coming an hour ago. Get inside.' },
-      { name: 'Check-in Hall', ground: 'terminal', boss: 'THE GATE AGENT', roster: { walker: 5, runner: 3, cart: 3 },
+      { name: 'Check-in Hall', scene: 'checkin', ground: 'terminal', boss: 'THE GATE AGENT', roster: { walker: 5, runner: 3, cart: 3 },
         story: 'Every bag is overweight and every passenger is dead. The luggage is somehow still moving.' },
-      { name: 'Security Line', ground: 'terminal', boss: 'THE SCANNER', roster: { walker: 3, guard: 3, dog: 3, robot: 1 },
+      { name: 'Security Line', scene: 'security', ground: 'terminal', boss: 'THE SCANNER', roster: { walker: 3, guard: 3, dog: 3, robot: 1 },
         story: 'Shoes off, laptops out, brains on the belt. The K-9 unit has picked up your scent.' },
-      { name: 'Duty Free', ground: 'store', boss: 'THE PERFUME COUNTER', roster: { walker: 3, twitcher: 3, sprayer: 3, karen: 2, dog: 1 },
+      { name: 'Duty Free', scene: 'dutyfree', ground: 'store', boss: 'THE PERFUME COUNTER', roster: { walker: 3, twitcher: 3, sprayer: 3, karen: 2, dog: 1 },
         story: 'Tax free, mercy free. Keep moving through the fragrance aisle.' },
-      { name: 'Gate B12', ground: 'carpet', boss: 'THE PILOT', roster: { walker: 3, runner: 3, bird: 3, karen: 2, dog: 2 },
+      { name: 'Gate B12', scene: 'gate', ground: 'carpet', boss: 'THE PILOT', roster: { walker: 3, runner: 3, bird: 3, karen: 2, dog: 2 },
         story: 'Final boarding call. Pigeons have nested in the ceiling and they are very, very hungry.' },
-      { name: 'Baggage Claim', ground: 'terminal', boss: 'THE CAROUSEL', roster: { walker: 2, runner: 3, cart: 4, brute: 1, guard: 2 },
+      { name: 'Baggage Claim', scene: 'claim', ground: 'terminal', boss: 'THE CAROUSEL', roster: { walker: 2, runner: 3, cart: 4, brute: 1, guard: 2 },
         story: 'Carousel 4 has been spinning for days. Something big is riding it.' },
-      { name: 'Moving Walkway', ground: 'carpet', boss: 'THE CONCOURSE', roster: { runner: 4, twitcher: 3, robot: 3, bird: 2 },
+      { name: 'Moving Walkway', scene: 'walkway', ground: 'carpet', boss: 'THE CONCOURSE', roster: { runner: 4, twitcher: 3, robot: 3, bird: 2 },
         story: 'The walkway is still on. So are the drones that patrol it.' },
-      { name: 'The Tarmac', ground: 'tarmac', boss: 'THE TUG', roster: { runner: 3, car: 3, cart: 2, bird: 3, dog: 2 },
+      { name: 'The Tarmac', scene: 'apron', ground: 'tarmac', boss: 'THE TUG', roster: { runner: 3, car: 3, cart: 2, bird: 3, dog: 2 },
         story: 'Outside on the apron. Baggage tugs are doing laps with no drivers.' },
-      { name: 'Hangar 9', ground: 'concrete', boss: 'THE MECHANIC', roster: { twitcher: 3, robot: 3, brute: 1, car: 2, guard: 2, sprayer: 2 },
+      { name: 'Hangar 9', scene: 'hangar', ground: 'concrete', boss: 'THE MECHANIC', roster: { twitcher: 3, robot: 3, brute: 1, car: 2, guard: 2, sprayer: 2 },
         story: 'The maintenance hangar. Heavy machines, heavy zombies, and nowhere to hide.' },
-      { name: 'Control Tower', ground: 'terminal', boss: 'AIR TRAFFIC CONTROL', roster: { runner: 3, twitcher: 3, guard: 3, robot: 3, bird: 2, brute: 1, dog: 2 },
+      { name: 'Control Tower', scene: 'tower', ground: 'terminal', boss: 'AIR TRAFFIC CONTROL', roster: { runner: 3, twitcher: 3, guard: 3, robot: 3, bird: 2, brute: 1, dog: 2 },
         story: 'The tower is the last place with power. Take it back and the radio might reach someone.' },
     ],
   },
@@ -189,25 +192,25 @@ export const WORLDS: Record<WorldId, WorldDef> = {
       car: { name: 'Parade Float', sprite: 'car' },
     }),
     levels: [
-      { name: 'Main Gate', ground: 'plaza', boss: 'THE TICKET TAKER', roster: { walker: 6, runner: 2, twitcher: 1 },
+      { name: 'Main Gate', scene: 'parkgate', ground: 'plaza', boss: 'THE TICKET TAKER', roster: { walker: 6, runner: 2, twitcher: 1 },
         story: 'Opening day. The turnstiles only turn one way now. In.' },
-      { name: 'The Midway', ground: 'boardwalk', boss: 'THE RINGMASTER', roster: { walker: 4, twitcher: 4, bird: 2 },
+      { name: 'The Midway', scene: 'midway', ground: 'boardwalk', boss: 'THE RINGMASTER', roster: { walker: 4, twitcher: 4, bird: 2 },
         story: 'Step right up. The clowns were always a bit much. Now they bite.' },
-      { name: 'Lazy River', ground: 'river', boss: 'THE LIFEGUARD', roster: { walker: 3, gator: 4, bird: 2 },
+      { name: 'Lazy River', scene: 'river', ground: 'river', boss: 'THE LIFEGUARD', roster: { walker: 3, gator: 4, bird: 2 },
         story: 'The river is not lazy any more. Keep away from the water line.' },
-      { name: 'The Carousel', ground: 'plaza', boss: 'THE BRASS RING', roster: { walker: 3, runner: 2, horse: 4, twitcher: 2 },
+      { name: 'The Carousel', scene: 'carousel', ground: 'plaza', boss: 'THE BRASS RING', roster: { walker: 3, runner: 2, horse: 4, twitcher: 2 },
         story: 'The music box is still playing and the horses have come off their poles.' },
-      { name: 'Bumper Cars', ground: 'concrete', boss: 'THE OPERATOR', roster: { runner: 3, cart: 5, twitcher: 2, karen: 2, dog: 1 },
+      { name: 'Bumper Cars', scene: 'bumper', ground: 'concrete', boss: 'THE OPERATOR', roster: { runner: 3, cart: 5, twitcher: 2, karen: 2, dog: 1 },
         story: 'No bumping, says the sign. The cars did not read it.' },
-      { name: 'Animatronic Theater', ground: 'carpet', boss: 'THE SHOWRUNNER', roster: { walker: 3, robot: 4, twitcher: 3 },
+      { name: 'Animatronic Theater', scene: 'theater', ground: 'carpet', boss: 'THE SHOWRUNNER', roster: { walker: 3, robot: 4, twitcher: 3 },
         story: 'The show must go on. The singing robots have been rewired for something else.' },
-      { name: 'Petting Zoo', ground: 'boardwalk', boss: 'THE ZOOKEEPER', roster: { dog: 4, horse: 3, bird: 3, gator: 1, walker: 2 },
+      { name: 'Petting Zoo', scene: 'zoo', ground: 'boardwalk', boss: 'THE ZOOKEEPER', roster: { dog: 4, horse: 3, bird: 3, gator: 1, walker: 2 },
         story: 'Feed the animals, says the sign. They are taking it literally.' },
-      { name: 'Haunted Mansion', ground: 'store', boss: 'THE BUTLER', roster: { twitcher: 4, runner: 3, sprayer: 3, brute: 1, guard: 2 },
+      { name: 'Haunted Mansion', scene: 'mansion', ground: 'store', boss: 'THE BUTLER', roster: { twitcher: 4, runner: 3, sprayer: 3, brute: 1, guard: 2 },
         story: 'It was always meant to be scary. It used to be pretend.' },
-      { name: 'Roller Coaster', ground: 'boardwalk', boss: 'THE CONDUCTOR', roster: { runner: 4, cart: 3, car: 2, robot: 2, bird: 2, gator: 2 },
+      { name: 'Roller Coaster', scene: 'coaster', ground: 'boardwalk', boss: 'THE CONDUCTOR', roster: { runner: 4, cart: 3, car: 2, robot: 2, bird: 2, gator: 2 },
         story: 'Keep your hands inside the ride at all times. Everything else wants them.' },
-      { name: 'The Castle', ground: 'plaza', boss: 'THE MASCOT KING', roster: { runner: 3, twitcher: 3, horse: 2, robot: 3, gator: 2, brute: 1, karen: 2, dog: 2 },
+      { name: 'The Castle', scene: 'castle', ground: 'plaza', boss: 'THE MASCOT KING', roster: { runner: 3, twitcher: 3, horse: 2, robot: 3, gator: 2, brute: 1, karen: 2, dog: 2 },
         story: 'Fireworks at nine. Clear the castle and the park finally closes.' },
     ],
   },

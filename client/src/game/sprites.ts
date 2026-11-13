@@ -199,16 +199,24 @@ const CAR_B = [...CAR_TOP, '...ooOo.........ooOo....', '....oo...........oo.....
 // ---------------- palettes ----------------
 const HUMAN_BASE: Palette = { h: '#2a2f22', s: '#7fa36a', S: '#5d7c4d', e: '#ff2a3a', b: '#7a0f14', c: '#3d4a5c', C: '#2c3646', p: '#2a2a33', P: '#18181f', x: '#ff3df0' };
 const human = (o: Palette): Palette => ({ ...HUMAN_BASE, ...o });
+/** Two branded shopping bags (x/X and y/Y) with dark handles (k). */
+const BAGS = (i: number): Palette => {
+  const sets = [['#e8e8f0', '#ff3a7a', '#c8102e', '#ffd23a'], ['#ffd23a', '#1a1a22', '#2a8ac8', '#e8e8f0'], ['#ff8ad2', '#ffffff', '#7a3ac8', '#ffd23a']];
+  const [x, X, y, Y] = sets[i % sets.length];
+  return { x, X, y, Y, k: '#141018' };
+};
 
 type Body = 'human' | 'dog' | 'bird' | 'gator' | 'horse' | 'robot' | 'cart' | 'luggage' | 'bumper' | 'car';
-interface SpriteSpec { body: Body; pal: Palette; scale?: number; acc?: 'pack' | 'bag' | 'bottle' | 'badge' | 'beard' | 'nose'; eye: string; lean?: boolean }
+interface SpriteSpec { body: Body; pal: Palette; scale?: number; acc?: 'pack' | 'bag' | 'bags' | 'bottle' | 'badge' | 'beard' | 'nose'; eye: string; lean?: boolean }
 
 const SPECS: Record<SpriteKey, SpriteSpec> = {
   walker: { body: 'human', pal: human({}), eye: '#ff2a3a' },
   runner: { body: 'human', pal: human({ h: '#5a1010', s: '#a2876a', S: '#7d644d', e: '#ffd23a', b: '#8a0f14', c: '#7a1d24', C: '#5a1219', p: '#2b2224', P: '#151012' }), eye: '#ffd23a', lean: true },
   twitcher: { body: 'human', pal: human({ h: '#2e1d3e', s: '#8b8fb0', S: '#676a8a', e: '#5dfff2', b: '#6a0f3a', c: '#3c2a52', C: '#2a1d3a', p: '#26203a', P: '#141020' }), eye: '#5dfff2' },
   carrier: { body: 'human', pal: human({ h: '#222a33', s: '#7f9aa3', S: '#5f7880', e: '#ff3df0', c: '#203545', C: '#15242f', p: '#1f2a33', P: '#10161c' }), acc: 'pack', eye: '#ff3df0' },
-  shopper: { body: 'human', pal: human({ h: '#4a2a18', c: '#1f6f78', C: '#17535a', x: '#ffd23a' }), acc: 'bag', eye: '#ff2a3a' },
+  shopper: { body: 'human', pal: human({ h: '#4a2a18', c: '#1f6f78', C: '#17535a', ...BAGS(0) }), acc: 'bags', eye: '#ff2a3a' },
+  rusher: { body: 'human', pal: human({ h: '#5a1010', s: '#a2876a', S: '#7d644d', e: '#ffd23a', b: '#8a0f14', c: '#7a1d24', C: '#5a1219', p: '#2b2224', P: '#151012', ...BAGS(1) }), acc: 'bags', eye: '#ffd23a', lean: true },
+  mallrat: { body: 'human', pal: human({ h: '#2e1d3e', s: '#8b8fb0', S: '#676a8a', e: '#5dfff2', b: '#6a0f3a', c: '#3c2a52', C: '#2a1d3a', p: '#26203a', P: '#141020', ...BAGS(2) }), acc: 'bags', eye: '#5dfff2' },
   guest: { body: 'human', pal: human({ h: '#6a4a20', c: '#d8642a', C: '#a84a1c', p: '#3a5a8a', x: '#ff4dd2' }), acc: 'bag', eye: '#ff2a3a' },
   guard: { body: 'human', pal: human({ h: '#101626', c: '#1c2a52', C: '#121c3a', p: '#121a2e', x: '#ffd54a' }), acc: 'badge', eye: '#ff6a2a' },
   tsa: { body: 'human', pal: human({ h: '#1a1a1a', c: '#5a7aa8', C: '#46628a', p: '#1a2030', x: '#e8e8f0' }), acc: 'badge', eye: '#ff6a2a' },
@@ -243,6 +251,18 @@ function addAcc(rows: Grid, acc: SpriteSpec['acc']): Grid {
   switch (acc) {
     case 'pack': return rows.map((r, i) => (i >= 6 && i <= 9 ? r.slice(0, 10) + 'xx' : r));
     case 'bag': return rows.map((r, i) => (i >= 9 && i <= 11 ? r.slice(0, 10) + 'xx' : r));
+    case 'bags': {
+      // pad a column each side, then hang a bag under each hand
+      const raised = rows[5][1] === 's'; // frame B has the arms reaching forward
+      const top = raised ? 7 : 10;
+      const L = ['.k.', 'xxx', 'xXx', 'xxx'], R = ['.k.', 'yyy', 'yYy', 'yyy'];
+      return rows.map((r, i) => {
+        const row = ('.' + r + '.').split('');
+        const k = i - top;
+        if (k >= 0 && k < 4) { for (let j = 0; j < 3; j++) { if (L[k][j] !== '.') row[j] = L[k][j]; if (R[k][j] !== '.') row[11 + j] = R[k][j]; } }
+        return row.join('');
+      });
+    }
     case 'bottle': return rows.map((r, i) => (i >= 6 && i <= 8 ? r.slice(0, 11) + 'x' : r));
     case 'badge': return rows.map((r, i) => (i === 7 ? r.slice(0, 4) + 'x' + r.slice(5) : r));
     case 'beard': return rows.map((r, i) => (i === 4 ? '...hhhhhh...' : i === 5 ? '....hhhh....' : r));

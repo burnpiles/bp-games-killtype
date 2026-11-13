@@ -3,6 +3,7 @@
 // Everything stays dark and low-contrast so characters and word tags always read on top.
 
 import type { Ground } from './worlds';
+import { paintScene, type Scene } from './scenes';
 
 type G = CanvasRenderingContext2D;
 
@@ -196,7 +197,6 @@ const PAINT: Record<Ground, (c: Ctx) => void> = {
     grid(c, tile, 'rgba(90,200,255,0.035)', 1, 1.5, 1.5);
     cracks(c, (c.w * c.h) / 60000 + 4);
     spill(c, ['rgba(255,60,200,0.07)', 'rgba(61,246,255,0.06)', 'rgba(255,150,40,0.06)', 'rgba(120,90,255,0.06)']);
-    edgeSpots(c, 4, 60).forEach(p => cone(c, p.x, p.y, c.compact ? 0.8 : 1));
   },
   atrium(c) {
     fill(c, '#14121a', '#0e0d14');
@@ -204,62 +204,37 @@ const PAINT: Record<Ground, (c: Ctx) => void> = {
     const { g, w, h } = c;
     for (let y = (h / 2) % tile - tile; y < h; y += tile) for (let x = (w / 2) % tile - tile; x < w; x += tile) {
       const alt = (Math.round(x / tile) + Math.round(y / tile)) % 2 === 0;
-      g.fillStyle = alt ? 'rgba(255,240,230,0.035)' : 'rgba(0,0,0,0.18)';
+      g.fillStyle = alt ? 'rgba(255,240,230,0.022)' : 'rgba(0,0,0,0.07)';
       g.fillRect(x, y, tile, tile);
     }
     // marble veins
     g.strokeStyle = 'rgba(255,255,255,0.03)'; g.lineWidth = 1;
     for (let i = 0; i < (w * h) / 20000; i++) { let x = c.rnd() * w, y = c.rnd() * h; g.beginPath(); g.moveTo(x, y); for (let k = 0; k < 5; k++) { x += (c.rnd() - 0.3) * 40; y += (c.rnd() - 0.5) * 30; g.lineTo(x, y); } g.stroke(); }
-    grid(c, tile, 'rgba(220,180,90,0.10)', 1.2);
+    grid(c, tile, 'rgba(220,180,90,0.06)', 1);
     grit(c, 90, 0.6);
     // ceiling light reflections
     for (let i = 0; i < 4; i++) { const x = c.rnd() * w; const gr = g.createLinearGradient(x - 60, 0, x + 60, 0); gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(0.5, 'rgba(255,230,255,0.025)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(x - 60, 0, 120, h); }
     spill(c, ['rgba(255,77,210,0.09)', 'rgba(61,246,255,0.06)', 'rgba(255,200,80,0.06)']);
-    const s = c.compact ? 0.75 : 1;
-    edgeSpots(c, 6, 70 * s).forEach((p, i) => (i % 2 ? planter(c, p.x, p.y, s) : pillar(c, p.x, p.y, s, 'rgba(255,77,210,0.35)')));
   },
   foodcourt(c) {
     fill(c, '#161214', '#110e10');
     const tile = c.compact ? 34 : 46;
     const { g, w, h } = c;
     for (let y = 0; y < h; y += tile) for (let x = 0; x < w; x += tile) {
-      g.fillStyle = (Math.floor(x / tile) + Math.floor(y / tile)) % 2 ? 'rgba(160,40,50,0.07)' : 'rgba(255,240,220,0.03)';
+      g.fillStyle = (Math.floor(x / tile) + Math.floor(y / tile)) % 2 ? 'rgba(160,40,50,0.035)' : 'rgba(255,240,220,0.015)';
       g.fillRect(x, y, tile, tile);
     }
     grid(c, tile, 'rgba(0,0,0,0.35)', 1);
     blotches(c, (w * h) / 16000, 'rgba(255,200,80,0.04)', 'rgba(40,20,0,0.25)');
     grit(c, 80, 0.7);
     spill(c, ['rgba(255,150,40,0.09)', 'rgba(255,60,90,0.07)', 'rgba(255,220,120,0.05)']);
-    const s = c.compact ? 0.75 : 1;
-    edgeSpots(c, 7, 60 * s).forEach(p => table(c, p.x, p.y, s));
   },
   parking(c) {
-    fill(c, '#0f1013', '#0c0d10');
-    blotches(c, (c.w * c.h) / 7000, 'rgba(70,70,80,0.05)', 'rgba(0,0,0,0.3)');
+    fill(c, '#111216', '#0d0e12');
+    blotches(c, (c.w * c.h) / 7000, 'rgba(70,70,80,0.06)', 'rgba(0,0,0,0.3)');
     grit(c, 30, 1.2);
-    const { g, w, h, compact } = c;
-    const s = compact ? 0.7 : 1;
-    const stall = 44 * s * 1.6;
-    // stalls along top and bottom (and sides on wide screens)
-    g.strokeStyle = 'rgba(230,230,210,0.16)'; g.lineWidth = 2;
-    const depth = 90 * s;
-    for (let x = (w / 2) % stall; x < w; x += stall) {
-      g.beginPath(); g.moveTo(x, 0); g.lineTo(x, depth); g.stroke();
-      g.beginPath(); g.moveTo(x, h - depth); g.lineTo(x, h); g.stroke();
-    }
-    g.beginPath(); g.moveTo(0, depth); g.lineTo(w, depth); g.moveTo(0, h - depth); g.lineTo(w, h - depth); g.stroke();
-    // lane arrows + center dashes
-    g.setLineDash([22 * s, 18 * s]);
-    g.strokeStyle = 'rgba(255,210,80,0.12)'; g.lineWidth = 3;
-    g.beginPath(); g.moveTo(0, h / 2 - 60 * s); g.lineTo(w, h / 2 - 60 * s); g.stroke();
-    g.setLineDash([]);
-    for (let i = 0; i < 6; i++) { const ox = c.rnd() * w, oy = depth + c.rnd() * (h - depth * 2); shadowBlob(c, ox, oy, 26 + c.rnd() * 30, 14 + c.rnd() * 10, 0.4); }
-    for (let x = (w / 2) % stall + stall / 2; x < w; x += stall) {
-      if (c.rnd() < 0.55) parkedCar(c, x, depth / 2 + 2, s, true);
-      if (c.rnd() < 0.55 && Math.abs(x - c.px) > 70) parkedCar(c, x, h - depth / 2 - 2, s, true);
-    }
+    cracks(c, (c.w * c.h) / 50000 + 3);
     spill(c, ['rgba(255,190,90,0.08)', 'rgba(120,160,255,0.05)'], 4);
-    for (let i = 0; i < 3; i++) lamp(c, c.rnd() * w, depth + 10, s, 'rgba(255,200,120,0.07)');
   },
   store(c) {
     fill(c, '#15100c', '#100c09');
@@ -278,8 +253,6 @@ const PAINT: Record<Ground, (c: Ctx) => void> = {
     }
     grit(c, 120, 0.5);
     spill(c, ['rgba(255,170,90,0.08)', 'rgba(200,120,255,0.06)', 'rgba(255,220,180,0.05)']);
-    const s = c.compact ? 0.7 : 1;
-    edgeSpots(c, 6, 60 * s).forEach(p => rack(c, p.x, p.y, s));
   },
   carpet(c) {
     fill(c, '#0c1416', '#0a1012');
@@ -293,8 +266,6 @@ const PAINT: Record<Ground, (c: Ctx) => void> = {
     grit(c, 40, 0.8);
     blotches(c, (w * h) / 15000);
     spill(c, ['rgba(61,246,255,0.07)', 'rgba(80,120,255,0.06)', 'rgba(255,90,90,0.05)']);
-    const s = c.compact ? 0.7 : 1;
-    edgeSpots(c, 5, 50 * s).forEach(p => seatRow(c, p.x, p.y, s, c.compact ? 3 : 5));
   },
   terminal(c) {
     fill(c, '#12161e', '#0e1118');
@@ -311,8 +282,6 @@ const PAINT: Record<Ground, (c: Ctx) => void> = {
     g.fillRect(w / 2 - 72, 0, 2, h); g.fillRect(w / 2 + 70, 0, 2, h);
     grid(c, c.compact ? 80 : 120, 'rgba(0,0,0,0.3)', 1);
     spill(c, ['rgba(61,246,255,0.08)', 'rgba(140,200,255,0.06)', 'rgba(255,200,120,0.05)']);
-    const s = c.compact ? 0.75 : 1;
-    edgeSpots(c, 6, 66 * s).forEach((p, i) => (i % 3 === 0 ? pillar(c, p.x, p.y, s, 'rgba(61,246,255,0.4)') : seatRow(c, p.x, p.y, s, 4)));
   },
   tarmac(c) {
     fill(c, '#0d0e10', '#0b0c0e');
@@ -325,7 +294,6 @@ const PAINT: Record<Ground, (c: Ctx) => void> = {
     g.beginPath(); g.moveTo(w * 0.15, 0); g.lineTo(w * 0.15, h); g.stroke(); g.setLineDash([]);
     for (let y = 30; y < h; y += 70) { glowDot(c, 10, y, 24, 'rgba(80,140,255,0.25)'); glowDot(c, w - 10, y, 24, 'rgba(80,140,255,0.25)'); }
     const s = compact ? 0.8 : 1;
-    edgeSpots(c, 8, 50).forEach(p => cone(c, p.x, p.y, s));
     spill(c, ['rgba(255,170,60,0.06)', 'rgba(80,140,255,0.06)'], 4);
   },
   boardwalk(c) {
@@ -340,8 +308,6 @@ const PAINT: Record<Ground, (c: Ctx) => void> = {
     }
     grit(c, 120, 0.6);
     spill(c, ['rgba(255,213,74,0.08)', 'rgba(255,77,210,0.07)', 'rgba(61,246,255,0.05)']);
-    const s = c.compact ? 0.75 : 1;
-    edgeSpots(c, 6, 60 * s).forEach((p, i) => lamp(c, p.x, p.y, s, i % 2 ? 'rgba(255,213,74,0.10)' : 'rgba(255,77,210,0.09)'));
   },
   plaza(c) {
     fill(c, '#141012', '#0f0c0e');
@@ -354,8 +320,6 @@ const PAINT: Record<Ground, (c: Ctx) => void> = {
     blotches(c, (w * h) / 14000);
     grit(c, 90, 0.6);
     spill(c, ['rgba(255,213,74,0.08)', 'rgba(255,77,210,0.07)', 'rgba(120,90,255,0.06)']);
-    const s = c.compact ? 0.75 : 1;
-    edgeSpots(c, 6, 60 * s).forEach((p, i) => (i % 2 ? planter(c, p.x, p.y, s) : lamp(c, p.x, p.y, s, 'rgba(255,213,74,0.10)')));
   },
   river(c) {
     PAINT.concrete(c);
@@ -369,11 +333,10 @@ const PAINT: Record<Ground, (c: Ctx) => void> = {
       for (let y = 10; y < h; y += 26) { g.beginPath(); g.moveTo(x0 + 6, y); g.quadraticCurveTo(x0 + ww / 2, y - 6, x0 + ww - 6, y); g.stroke(); }
       g.fillStyle = 'rgba(200,200,180,0.12)'; g.fillRect(x0 === 0 ? ww : x0 - 3, 0, 3, h);
     }
-    edgeSpots(c, 4, 90).forEach(p => rock(c, p.x, p.y, compact ? 0.7 : 1));
   },
 };
 
-export function paintGround(ground: Ground, w: number, h: number, dpr: number, compact: boolean, player: { x: number; y: number }, key: string): HTMLCanvasElement {
+export function paintGround(ground: Ground, w: number, h: number, dpr: number, compact: boolean, player: { x: number; y: number }, key: string, scene: Scene | null): HTMLCanvasElement {
   const cnv = document.createElement('canvas');
   const s = Math.min(dpr, 2);
   cnv.width = Math.max(1, Math.round(w * s)); cnv.height = Math.max(1, Math.round(h * s));
@@ -381,6 +344,25 @@ export function paintGround(ground: Ground, w: number, h: number, dpr: number, c
   g.scale(s, s);
   const c: Ctx = { g, w, h, compact, px: player.x, py: player.y, rnd: seeded(hash(key)) };
   PAINT[ground](c);
+  // lift the floor a touch so environments read on phones without washing out the characters
+  g.globalCompositeOperation = 'lighter';
+  g.fillStyle = 'rgba(150,160,190,0.045)';
+  g.fillRect(0, 0, w, h);
+  g.globalCompositeOperation = 'source-over';
+  if (scene) {
+    paintScene(g, scene, seeded(hash(key + ':scene')));
+    // exposure: add a copy of the finished image onto itself, so mid-tones lift and blacks stay black
+    const tmp = document.createElement('canvas');
+    tmp.width = cnv.width; tmp.height = cnv.height;
+    tmp.getContext('2d')!.drawImage(cnv, 0, 0);
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalCompositeOperation = 'lighter';
+    g.globalAlpha = 0.6;
+    g.drawImage(tmp, 0, 0);
+    g.globalAlpha = 1;
+    g.globalCompositeOperation = 'source-over';
+    g.setTransform(s, 0, 0, s, 0, 0);
+  }
   // painted defence perimeter around the player
   const R = compact ? 64 : 110;
   g.save();
